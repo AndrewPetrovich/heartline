@@ -44,3 +44,11 @@
 ```
 
 GPT-изменения никогда не применяются автоматически: сначала создаётся Revision Candidate и пользователь принимает/отклоняет каждое предложение.
+
+
+## Patch 2.0.1 — GPT acceptance UX
+- Accepted GPT changes are visible immediately as a safe preview without mutating the base version.
+- Added "Показать в тексте" from GPT Diff.
+- Resolved reviews (`Принято`, `Отклонено`, `Архив`) no longer clutter the reader or review counter.
+- Creating a GPT version now records accepted changes in the version changelog.
+- Service Worker cache bumped so GitHub Pages receives the new app.js.
