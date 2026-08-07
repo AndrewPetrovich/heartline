@@ -24,7 +24,7 @@
 
 Распакуйте ZIP и загрузите **все файлы из этой папки в корень репозитория**, заменив существующие. `index.html` должен лежать в корне ветки `main`. GitHub Pages: `main` → `/(root)`.
 
-После обновления рекомендуется открыть сайт и сделать жёсткое обновление страницы. Service Worker использует новый cache key `heartline-editor-v2-2026-08-07-1`.
+После обновления рекомендуется открыть сайт и сделать жёсткое обновление страницы. Service Worker использует новый cache key `heartline-editor-v2-2026-08-07-mobile-1`.
 
 ## GPT response format
 
@@ -52,3 +52,22 @@ GPT-изменения никогда не применяются автомат
 - Resolved reviews (`Принято`, `Отклонено`, `Архив`) no longer clutter the reader or review counter.
 - Creating a GPT version now records accepted changes in the version changelog.
 - Service Worker cache bumped so GitHub Pages receives the new app.js.
+
+
+## v2.0.2 startup reliability
+- Navigation is wired before IndexedDB initialization.
+- Core scripts are cache-busted.
+- Service worker uses network-first for HTML/JS/CSS.
+- IndexedDB blocked/hung state now shows a recovery message instead of a dead header.
+
+## v2.1 — Mobile Editor
+- Полный мобильный режим для iPhone/Android без урезания функций.
+- Все 6 разделов доступны в нижней навигации: Библиотека, Читать, Замечания, Версии, GPT, Экспорт.
+- Структура сцен и замечания в Reader открываются как touch-friendly bottom sheets с затемнением и кнопкой закрытия.
+- Reader получил крупные фиксированные кнопки Назад/Вперёд и компактный «Переиграть отсюда».
+- Модальные окна вычитки, редактирования, GPT Diff, import и validation на телефоне открываются во весь экран и корректно работают с экранной клавиатурой.
+- Выделение текста кэшируется на 15 секунд, поэтому комментарий к выделенной фразе работает и на мобильных браузерах, где тап по кнопке может снять выделение.
+- Увеличены touch-targets, поля ввода используют 16px для предотвращения автозума iOS.
+- Добавлены safe-area отступы для iPhone, 100dvh и отдельная оптимизация landscape.
+- Табличные/двухколоночные блоки автоматически перестраиваются в один столбец; действия не скрываются.
+- Static scene background remains fully non-animated.

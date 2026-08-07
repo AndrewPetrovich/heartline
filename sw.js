@@ -1,5 +1,5 @@
-const CACHE='heartline-editor-v2-2026-08-07-3';
-const ASSETS=['./','./index.html','./styles.css?v=20260807-202','./storage.js?v=20260807-202','./parser.js?v=20260807-202','./exporter.js?v=20260807-202','./app.js?v=20260807-202','./builtin-novel.js?v=20260807-202','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
+const CACHE='heartline-editor-v2-2026-08-07-mobile-1';
+const ASSETS=['./','./index.html','./styles.css?v=20260807-210','./storage.js?v=20260807-210','./parser.js?v=20260807-210','./exporter.js?v=20260807-210','./app.js?v=20260807-210','./builtin-novel.js?v=20260807-210','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const isNav=e.request.mode==='navigate';const url=new URL(e.request.url);const core=isNav||/\.(?:html|js|css)$/.test(url.pathname);if(core){e.respondWith(fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r}).catch(()=>caches.match(e.request).then(hit=>hit||(isNav?caches.match('./index.html'):undefined))));return;}e.respondWith(caches.match(e.request).then(hit=>hit||fetch(e.request).then(r=>{const copy=r.clone();caches.open(CACHE).then(c=>c.put(e.request,copy));return r})));});
