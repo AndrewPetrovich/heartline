@@ -1,630 +1,184 @@
 (() => {
-  'use strict';
+'use strict';
+const DB=window.HEARTLINEDB, P=window.HEARTLINEParser, X=window.HEARTLINEExporter, BUILTIN=window.HEARTLINE_BUILTIN_NOVEL;
+const $=id=>document.getElementById(id);
+const app={route:'library',novels:[],versions:[],sessions:[],candidates:[],cycles:[],activeNovelId:null,activeVersionId:null,activeNovel:null,activeVersion:null,session:null,editorCursorFragmentId:null,versionDiff:null,deferredInstall:null,toastTimer:null,importDraft:null,reviewTarget:null,editTarget:null,candidateOpenId:null};
+const STATUS=['Открыто','Передано GPT','GPT исправил','Требует проверки','Принято','Отклонено','Архив'];
+const now=()=>new Date().toISOString();
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clone=o=>P.deepClone(o);
+const slug=P.slug;
+function fmtDate(v){if(!v)return'—';try{return new Intl.DateTimeFormat('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}).format(new Date(v));}catch(_){return String(v)}}
+function plural(n,a,b,c){n=Math.abs(n)%100;const n1=n%10;if(n>10&&n<20)return c;if(n1>1&&n1<5)return b;if(n1===1)return a;return c}
+function toast(text){clearTimeout(app.toastTimer);const el=$('toast');el.textContent=text;el.classList.remove('hidden');app.toastTimer=setTimeout(()=>el.classList.add('hidden'),2400)}
+function setRoute(route){app.route=route;document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.route===route));renderRoute();}
+function activeContent(){return app.activeVersion?.content||null}
+function editMap(version=app.activeVersion){const m={};for(const e of version?.edits||[])m[e.fragmentId]=e.editedText;return m}
+function currentText(step,version=app.activeVersion){const m=editMap(version);return Object.prototype.hasOwnProperty.call(m,step.fragmentId)?m[step.fragmentId]:(step.type==='choice'?(step.prompt||''):(step.text||''))}
+function sourceText(step){return step.type==='choice'?(step.prompt||''):(step.text||'')}
+function currentReviewCount(fragmentId){return(app.activeVersion?.reviews||[]).filter(r=>r.fragmentId===fragmentId&&r.status!=='Архив').length}
+function currentReviews(fragmentId){return(app.activeVersion?.reviews||[]).filter(r=>r.fragmentId===fragmentId&&r.status!=='Архив')}
+function getVersion(id){return app.versions.find(v=>v.versionId===id)||null}
+function getNovel(id){return app.novels.find(n=>n.novelId===id)||null}
+function getSessionForVersion(versionId){return app.sessions.find(s=>s.versionId===versionId&&s.sessionId===`session:${versionId}`)||null}
+function versionLabel(v){return v?.label||v?.versionId||'Версия'}
 
-  const BUILTIN = window.HEARTLINE_BUILTIN_NOVEL;
-  const $ = (id) => document.getElementById(id);
-  const els = {
-    libraryScreen: $('libraryScreen'), playerScreen: $('playerScreen'), novelGrid: $('novelGrid'), libraryCount: $('libraryCount'),
-    importBtn: $('importBtn'), importJsonBtn: $('importJsonBtn'), fileInput: $('fileInput'), jsonInput: $('jsonInput'), installBtn: $('installBtn'),
-    backToLibraryBtn: $('backToLibraryBtn'), debugBtn: $('debugBtn'), historyBtn: $('historyBtn'), restartBtn: $('restartBtn'), saveBtn: $('saveBtn'),
-    sceneBackdrop: $('sceneBackdrop'), sceneLabel: $('sceneLabel'), visualCue: $('visualCue'), novelTitleMini: $('novelTitleMini'), sceneTitleMini: $('sceneTitleMini'), progressBar: $('progressBar'),
-    dialoguePanel: $('dialoguePanel'), speakerName: $('speakerName'), thoughtBadge: $('thoughtBadge'), dialogueText: $('dialogueText'), tapHint: $('tapHint'),
-    choicePanel: $('choicePanel'), choicePrompt: $('choicePrompt'), choiceOptions: $('choiceOptions'),
-    historyDialog: $('historyDialog'), historyList: $('historyList'), debugDialog: $('debugDialog'), debugScene: $('debugScene'), debugVars: $('debugVars'), debugTech: $('debugTech'),
-    jumpSceneBtn: $('jumpSceneBtn'), exportStateBtn: $('exportStateBtn'), exportNovelBtn: $('exportNovelBtn'), sceneDialog: $('sceneDialog'), sceneSearch: $('sceneSearch'), sceneList: $('sceneList'),
-    importDialog: $('importDialog'), importTitle: $('importTitle'), importStatus: $('importStatus'), installDialog: $('installDialog'), toast: $('toast')
-  };
+async function reloadCollections(){
+  [app.novels,app.versions,app.sessions,app.candidates,app.cycles]=await Promise.all([DB.getAll('novels'),DB.getAll('versions'),DB.getAll('sessions'),DB.getAll('candidates'),DB.getAll('gptCycles')]);
+  app.novels.sort((a,b)=>(b.lastOpenedAt||b.createdAt||'').localeCompare(a.lastOpenedAt||a.createdAt||''));
+  app.versions.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  if(app.activeNovelId){app.activeNovel=getNovel(app.activeNovelId);if(app.activeNovel){app.activeVersionId=app.activeNovel.activeVersionId;app.activeVersion=getVersion(app.activeVersionId);}else clearActive();}
+}
+function clearActive(){app.activeNovelId=null;app.activeVersionId=null;app.activeNovel=null;app.activeVersion=null;app.session=null;app.editorCursorFragmentId=null}
+async function saveVersion(){if(app.activeVersion){app.activeVersion.updatedAt=now();await DB.put('versions',app.activeVersion);const i=app.versions.findIndex(v=>v.versionId===app.activeVersion.versionId);if(i>=0)app.versions[i]=app.activeVersion;}}
+async function saveSession(immediate=true){if(!app.session)return;app.session.updatedAt=now();await DB.put('sessions',app.session);const i=app.sessions.findIndex(s=>s.sessionId===app.session.sessionId);if(i>=0)app.sessions[i]=app.session;else app.sessions.push(app.session);const a=$('autosaveState');if(a){a.textContent='Сохранено';setTimeout(()=>{if(a)a.textContent='Автосохранение'},900)}}
+async function saveNovelRecord(){if(!app.activeNovel)return;app.activeNovel.lastOpenedAt=now();await DB.put('novels',app.activeNovel);const i=app.novels.findIndex(n=>n.novelId===app.activeNovel.novelId);if(i>=0)app.novels[i]=app.activeNovel;}
 
-  const INDEX_KEY = 'heartline.library.v1';
-  const novelKey = (id) => `heartline.novel.${id}`;
-  const progressKey = (id) => `heartline.progress.${id}`;
-  let novels = [];
-  let currentNovel = null;
-  let state = null;
-  let deferredInstall = null;
-  let toastTimer = null;
-
-  function deepClone(obj) { return typeof structuredClone === 'function' ? structuredClone(obj) : JSON.parse(JSON.stringify(obj)); }
-  function escapeHtml(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-  function hashHue(s) { let h = 0; for (const ch of String(s || '')) h = (h * 31 + ch.charCodeAt(0)) | 0; return Math.abs(h) % 360; }
-  function countChoices(novel) { return novel.scenes.reduce((n, sc) => n + sc.steps.filter(s => s.type === 'choice').length, 0); }
-  function findScene(id) { return currentNovel?.scenes?.find(s => s.id === id) || null; }
-  function getVar(name) { return state?.vars?.[name]; }
-  function setVar(name, value) { if (!state.vars) state.vars = {}; state.vars[name] = value; }
-  function boolVar(name) { return getVar(name) === true || getVar(name) === 'TRUE' || getVar(name) === 1; }
-
-  function loadIndex() {
-    try { return JSON.parse(localStorage.getItem(INDEX_KEY) || '[]'); } catch (_) { return []; }
-  }
-  function saveIndex(index) { localStorage.setItem(INDEX_KEY, JSON.stringify(index)); }
-
-  function refreshLibrary() {
-    const imported = [];
-    const index = loadIndex();
-    for (const meta of index) {
-      try {
-        const raw = localStorage.getItem(novelKey(meta.id));
-        if (!raw) continue;
-        imported.push(JSON.parse(raw));
-      } catch (_) {}
+async function ensureBuiltin(){
+  const n=P.normalizeNovel(BUILTIN);const novelId=n.id||'poslednyaya-podacha';const label=n.contentVersion||'literary-v3';const versionId=`${novelId}::${slug(label)}`;
+  let nr=await DB.get('novels',novelId),vr=await DB.get('versions',versionId);
+  if(!vr){const validation=P.validateNovel(n);vr={versionId,novelId,label,parentVersionId:null,sourceType:'builtin',createdAt:now(),updatedAt:now(),content:n,validation:stripValidation(validation),reviews:[],edits:[],changeLog:[],status:'ready'};await DB.put('versions',vr);}
+  if(!nr){nr={novelId,title:n.title,activeVersionId:versionId,createdAt:now(),lastOpenedAt:null};await DB.put('novels',nr);}
+}
+function stripValidation(v){return{ok:v.ok,errors:v.errors,warnings:v.warnings,stats:v.stats,checkedAt:now()}}
+async function migrateLegacy(){
+  try{
+    const idx=JSON.parse(localStorage.getItem('heartline.library.v1')||'[]');
+    for(const meta of idx){const raw=localStorage.getItem(`heartline.novel.${meta.id}`);if(!raw)continue;if(await DB.get('novels',meta.id))continue;const content=P.normalizeNovel(JSON.parse(raw)),vrId=`${meta.id}::legacy-${Date.now().toString(36)}`,val=P.validateNovel(content);await DB.put('versions',{versionId:vrId,novelId:meta.id,label:'Импорт из MVP',parentVersionId:null,sourceType:'legacy',createdAt:now(),updatedAt:now(),content,validation:stripValidation(val),reviews:[],edits:[],changeLog:[],status:'ready'});await DB.put('novels',{novelId:meta.id,title:content.title,activeVersionId:vrId,createdAt:now(),lastOpenedAt:null});}
+    const novels=await DB.getAll('novels');
+    for(const nr of novels){
+      const sessionId=`session:${nr.activeVersionId}`; if(await DB.get('sessions',sessionId))continue;
+      const raw=localStorage.getItem(`heartline.progress.${nr.novelId}`); if(!raw)continue;
+      let lp;try{lp=JSON.parse(raw)}catch(_){continue} const vr=await DB.get('versions',nr.activeVersionId); if(!vr)continue;
+      const ss=createInitialSession(vr); for(const k of ['sceneId','ip','branch','pendingChoice','vars','tech','choices','ended'])if(lp[k]!==undefined)ss[k]=clone(lp[k]);
+      if(lp.lastDisplayed?.text){const fs=P.flattenFragments(vr.content),match=fs.find(f=>f.sceneId===lp.sceneId&&String(f.text||'')===String(lp.lastDisplayed.text));if(match){ss.timeline=[{kind:'fragment',sceneId:match.sceneId,fragmentId:match.fragmentId,beforeEngine:clone({sceneId:ss.sceneId,ip:ss.ip,branch:ss.branch,pendingChoice:ss.pendingChoice,vars:ss.vars,tech:ss.tech,choices:ss.choices,ended:ss.ended}),at:now()}];ss.viewIndex=0}}
+      if(ss.ended&&!ss.timeline.length)ss.timeline=[{kind:'end',sceneId:ss.sceneId,fragmentId:`END_${ss.sceneId}`,text:'Прохождение завершено.',beforeEngine:clone({sceneId:ss.sceneId,ip:ss.ip,branch:ss.branch,pendingChoice:ss.pendingChoice,vars:ss.vars,tech:ss.tech,choices:ss.choices,ended:ss.ended}),at:now()}],ss.viewIndex=0;
+      await DB.put('sessions',ss);
     }
-    novels = [BUILTIN, ...imported];
-    els.libraryCount.textContent = `${novels.length} ${plural(novels.length, 'новелла', 'новеллы', 'новелл')}`;
-    els.novelGrid.innerHTML = novels.map(renderNovelCard).join('');
-    els.novelGrid.querySelectorAll('[data-play]').forEach(btn => btn.addEventListener('click', () => openNovel(btn.dataset.play)));
-    els.novelGrid.querySelectorAll('[data-delete]').forEach(btn => btn.addEventListener('click', () => deleteNovel(btn.dataset.delete)));
-  }
+  }catch(_){}
+}
 
-  function compatibleProgress(novel) {
-    const saved = loadProgress(novel.id);
-    if (!saved) return null;
-    if (novel.contentVersion && saved.contentVersion !== novel.contentVersion) return null;
-    return saved;
-  }
+function createInitialSession(version){return{sessionId:`session:${version.versionId}`,novelId:version.novelId,versionId:version.versionId,createdAt:now(),updatedAt:now(),sceneId:version.content.startScene||version.content.scenes[0].id,ip:0,branch:null,pendingChoice:null,vars:{HONESTY:0,ATTRACTION:0,TRUST:0,PROFESSIONAL_COST:0},tech:{bg:'',cg:'',music:'',sfx:'',sprite:'',reaction:'',fade:''},choices:[],timeline:[],viewIndex:-1,ended:false};}
+function engineSnapshot(){const s=app.session;return clone({sceneId:s.sceneId,ip:s.ip,branch:s.branch,pendingChoice:s.pendingChoice,vars:s.vars,tech:s.tech,choices:s.choices,ended:s.ended});}
+function restoreEngine(sn){Object.assign(app.session,clone(sn));}
+function findScene(id){return activeContent()?.scenes?.find(s=>s.id===id)||null}
+function boolVar(name){const v=app.session?.vars?.[name];return v===true||v==='TRUE'||v===1}
+function setVar(name,value){app.session.vars[name]=value}
+function getVar(name){return app.session.vars[name]}
+function currentSequence(){const s=app.session;if(!s.branch){const sc=findScene(s.sceneId);return sc?{steps:sc.steps,ip:s.ip,kind:'scene'}:null;}const sc=findScene(s.sceneId),choice=sc?.steps?.find(x=>x.type==='choice'&&x.id===s.branch.choiceId),opt=choice?.options?.find(x=>x.id===s.branch.optionId);return opt?{steps:opt.steps,ip:s.branch.ip,kind:'branch',option:opt}:null}
+function setSeqIp(kind,ip){if(kind==='branch')app.session.branch.ip=ip;else app.session.ip=ip}
+function evalCondition(expr){const s=String(expr||'').trim().replace(/[.;]+$/,'');let m=s.match(/^([A-Z0-9_]+)\s*=\s*(TRUE|FALSE)$/i);if(m)return boolVar(m[1])===(m[2].toUpperCase()==='TRUE');m=s.match(/^([A-Z0-9_]+)\s*(>=|<=|>|<|=)\s*(-?\d+)$/i);if(m){const a=Number(getVar(m[1])||0),b=Number(m[3]);return({'>':a>b,'<':a<b,'>=':a>=b,'<=':a<=b,'=':a===b})[m[2]];}return true}
+function computeIfScope(steps,idx){const hard=new Set(['BG','MUSIC','SFX','SPRITE','CG','FADE','GOTO','CHOICE','SYSTEM','REACTION']);let hardEnd=steps.length,nextIf=-1;for(let i=idx+1;i<steps.length;i++){const s=steps[i];if(s.type==='tech'&&s.command==='IF'){nextIf=i;break}if(s.type==='tech'&&hard.has(s.command)){hardEnd=i;break}}if(nextIf>=0)return Math.max(0,nextIf-idx-1);let prevHard=-1,prevIf=-1;for(let i=idx-1;i>=0;i--){const s=steps[i];if(s.type==='tech'&&hard.has(s.command)){prevHard=i;break}if(s.type==='tech'&&s.command==='IF'){prevIf=i;break}}if(prevIf>prevHard){const len=idx-prevIf-1;return Math.min(len,Math.max(0,hardEnd-idx-1));}let k=idx+1;while(k<steps.length&&steps[k].type==='tech'&&(steps[k].command==='SET'||steps[k].command==='CLEAR'))k++;if(k>idx+1)return k-idx-1;return Math.max(0,hardEnd-idx-1)}
+function applySet(value){const s=String(value||'').trim().replace(/[.;]+$/,'');let m=s.match(/^([A-Z0-9_]+)\s*([+-]\d+)$/i);if(m){setVar(m[1],Number(getVar(m[1])||0)+Number(m[2]));return}m=s.match(/^([A-Z0-9_]+)\s*=\s*(TRUE|FALSE)$/i);if(m){setVar(m[1],m[2].toUpperCase()==='TRUE');return}m=s.match(/^([A-Z0-9_]+)\s*=\s*([A-Z0-9_]+)$/i);if(m)setVar(m[1],m[2])}
+function applyClear(value){for(const p of String(value||'').split(';')){const k=p.trim().replace(/[.;]+$/,'');if(k)setVar(k,false)}}
+function evaluateRoute(){const scores=[['ROUTE_EQUAL',Number(getVar('HONESTY')||0)],['ROUTE_FIRE',Number(getVar('ATTRACTION')||0)],['ROUTE_MASK',Number(getVar('TRUST')||0)]].sort((a,b)=>b[1]-a[1]);if(scores[0][1]-scores[1][1]>=2&&scores.filter(x=>x[1]===scores[0][1]).length===1){setVar('ROUTE_ID',scores[0][0]);setVar('DIRECT_ROUTE_CHOICE',false)}else{setVar('ROUTE_ID','');setVar('DIRECT_ROUTE_CHOICE',true)}}
+function executeSystem(value){const v=String(value||'').trim();if(/^Сравнить\s+HONESTY/i.test(v)){evaluateRoute();return}if(/^FLAG_[A-Z0-9_]+\s*=/i.test(v))for(const p of v.split(';'))applySet(p.trim());if(/^END\s+ROUTE_/i.test(v)){app.session.ended=true;pushEnd(`Конец маршрута ${(v.match(/ROUTE_[A-Z]+/i)||[''])[0].replace('ROUTE_','')}.`)}}
+function resolveGoto(raw){let t=String(raw||'').trim().replace(/[.;]+$/,'');if(/соответствующая маршрутная сцена/i.test(t)){if(boolVar('FLAG_PACT_EQUAL'))return'CH03_SC03_EQUAL';if(boolVar('FLAG_PACT_FIRE'))return'CH03_SC03_FIRE';if(boolVar('FLAG_PACT_MASK'))return'CH03_SC03_MASK';return'CH03_SC03_EQUAL'}if(/согласно ROUTE_ID/i.test(t)){const r=getVar('ROUTE_ID');if(r==='ROUTE_EQUAL')return'CH06_SC05_EQUAL';if(r==='ROUTE_FIRE')return'CH06_SC05_FIRE';if(r==='ROUTE_MASK')return'CH06_SC05_MASK';return'CH06_SC04_DIRECT'}return t}
+function jumpTo(target){const sc=findScene(target);if(!sc){pushEnd(`Не найден переход: ${target}`);app.session.ended=true;return false}app.session.sceneId=target;app.session.ip=0;app.session.branch=null;app.session.pendingChoice=null;app.session.tech.cg='';return true}
+function executeTech(st){const v=st.value||'';switch(st.command){case'BG':app.session.tech.bg=v;break;case'CG':app.session.tech.cg=v;break;case'MUSIC':app.session.tech.music=v;break;case'SFX':app.session.tech.sfx=v;break;case'SPRITE':app.session.tech.sprite=v;break;case'REACTION':app.session.tech.reaction=v;break;case'FADE':app.session.tech.fade=v;break;case'SET':applySet(v);break;case'CLEAR':applyClear(v);break;case'SYSTEM':executeSystem(v);break;case'GOTO':jumpTo(resolveGoto(v));break;}return app.session.ended}
+function pushTimeline(entry){app.session.timeline.push(entry);app.session.viewIndex=app.session.timeline.length-1;app.editorCursorFragmentId=null}
+function pushEnd(text){if(app.session.timeline.at(-1)?.kind==='end')return;pushTimeline({kind:'end',sceneId:app.session.sceneId,fragmentId:`END_${app.session.sceneId}_${app.session.timeline.length}`,text,beforeEngine:engineSnapshot(),at:now()})}
+async function advanceLive(){if(!app.session||app.session.pendingChoice||app.session.ended)return;if(app.session.viewIndex<app.session.timeline.length-1){app.session.viewIndex++;renderReaderCurrent();await saveSession();return}let safety=0;while(safety++<600){const seq=currentSequence();if(!seq){pushEnd('Не удалось восстановить ветку.');break}if(seq.ip>=seq.steps.length){if(seq.kind==='branch'){const fb=seq.option?.fallbackGoto||seq.option?.goto||null;app.session.branch=null;if(fb){jumpTo(resolveGoto(fb));continue}}const idx=activeContent().scenes.findIndex(s=>s.id===app.session.sceneId),next=activeContent().scenes[idx+1];if(next){jumpTo(next.id);continue}app.session.ended=true;pushEnd('Конец доступного сценария.');break}const idx=seq.ip,st=seq.steps[idx],before=engineSnapshot();setSeqIp(seq.kind,idx+1);if(st.type==='choice'){app.session.pendingChoice={sceneId:app.session.sceneId,choiceId:st.id};pushTimeline({kind:'choice',sceneId:app.session.sceneId,fragmentId:st.fragmentId,choiceId:st.id,selectedOptionId:null,selectedLabel:null,beforeEngine:before,at:now()});break}if(st.type==='tech'){if(st.command==='IF'&&!evalCondition(st.value)){const scope=Number.isInteger(st.scope)&&st.scope>=0?st.scope:computeIfScope(seq.steps,idx);setSeqIp(seq.kind,Math.min(seq.steps.length,idx+1+scope));continue}executeTech(st);if(app.session.ended)break;continue}if(['dialogue','narration','thought'].includes(st.type)){pushTimeline({kind:'fragment',sceneId:app.session.sceneId,fragmentId:st.fragmentId,beforeEngine:before,at:now()});break}}
+  await saveSession();renderReaderCurrent();}
+async function chooseOption(optionId){const entry=app.session.timeline[app.session.viewIndex];if(!entry||entry.kind!=='choice'||entry.selectedOptionId)return;const sc=findScene(entry.sceneId),choice=sc?.steps.find(s=>s.type==='choice'&&s.id===entry.choiceId),opt=choice?.options.find(o=>o.id===optionId);if(!opt)return;entry.selectedOptionId=opt.id;entry.selectedLabel=opt.label;app.session.pendingChoice=null;app.session.branch={choiceId:choice.id,optionId:opt.id,ip:0};app.session.choices.push({sceneId:entry.sceneId,choiceId:choice.id,optionId:opt.id,label:opt.label,at:now()});await saveSession();await advanceLive()}
+async function viewBack(){if(app.editorCursorFragmentId){editorMove(-1);return}if(!app.session||app.session.viewIndex<=0)return;app.session.viewIndex--;renderReaderCurrent();await saveSession()}
+async function viewForward(){if(app.editorCursorFragmentId){editorMove(1);return}if(!app.session)return;if(app.session.viewIndex<app.session.timeline.length-1){app.session.viewIndex++;renderReaderCurrent();await saveSession();return}const e=app.session.timeline[app.session.viewIndex];if(e?.kind==='choice'&&!e.selectedOptionId)return;await advanceLive()}
+function editorMove(delta){const fs=P.flattenFragments(activeContent()).filter(f=>f.type!=='tech');const i=fs.findIndex(f=>f.fragmentId===app.editorCursorFragmentId);if(i<0)return;const n=fs[i+delta];if(n){app.editorCursorFragmentId=n.fragmentId;renderReaderCurrent()}}
+async function replayFromView(){if(app.editorCursorFragmentId){toast('Сначала вернитесь к прохождению.');return}const idx=app.session?.viewIndex??-1,e=app.session?.timeline?.[idx];if(!e?.beforeEngine)return;app.replayTarget={idx,entry:e};$('replayDialog').showModal()}
+async function confirmReplay(){const {idx,entry}=app.replayTarget||{};if(!entry)return;const archived=clone(app.session);archived.sessionId=`session:${app.activeVersionId}:archive:${Date.now().toString(36)}`;archived.archived=true;await DB.put('sessions',archived);restoreEngine(entry.beforeEngine);app.session.timeline=app.session.timeline.slice(0,idx);app.session.viewIndex=app.session.timeline.length-1;app.session.ended=false;app.session.pendingChoice=null;await saveSession();$('replayDialog').close();await advanceLive();toast('Создано новое прохождение от выбранного места')}
 
-  function renderNovelCard(novel) {
-    const saved = compatibleProgress(novel);
-    const progress = saved ? Math.round(((novel.scenes.findIndex(s => s.id === saved.sceneId) + 1) / novel.scenes.length) * 100) : 0;
-    const imported = novel.id !== BUILTIN.id;
-    return `<article class="novel-card" style="--card-hue:${hashHue(novel.title)}">
-      <div class="cover-mark">${novel.id === BUILTIN.id ? 'HEARTLINE • PRELOADED' : 'IMPORTED'}</div>
-      ${imported ? `<button class="card-menu" data-delete="${escapeHtml(novel.id)}" title="Удалить">×</button>` : ''}
-      <h3>${escapeHtml(novel.title)}</h3>
-      <p>${escapeHtml(novel.subtitle || 'Интерактивная новелла')}</p>
-      <div class="card-stats"><span>${novel.scenes.length} сцен</span><span>${countChoices(novel)} выборов</span>${saved ? `<span>прогресс ${Math.max(1, progress)}%</span>` : ''}</div>
-      <button class="card-btn" data-play="${escapeHtml(novel.id)}">${saved && !saved.ended ? 'Продолжить' : 'Играть'}</button>
-    </article>`;
-  }
+async function openNovel(novelId,versionId=null){const novel=getNovel(novelId);if(!novel)return;app.activeNovelId=novelId;app.activeNovel=novel;app.activeVersionId=versionId||novel.activeVersionId;app.activeVersion=getVersion(app.activeVersionId);if(!app.activeVersion)return;app.session=getSessionForVersion(app.activeVersionId);if(!app.session){app.session=createInitialSession(app.activeVersion);await DB.put('sessions',app.session);app.sessions.push(app.session)}app.editorCursorFragmentId=null;await saveNovelRecord();if(!app.session.timeline.length&&!app.session.ended)await advanceLive();setRoute('reader')}
+async function openVersion(versionId){const v=getVersion(versionId);if(!v)return;const n=getNovel(v.novelId);if(n){n.activeVersionId=versionId;await DB.put('novels',n)}await reloadCollections();await openNovel(v.novelId,versionId)}
 
-  function plural(n, one, few, many) {
-    const a = Math.abs(n) % 100, b = a % 10;
-    if (a > 10 && a < 20) return many;
-    if (b > 1 && b < 5) return few;
-    if (b === 1) return one;
-    return many;
-  }
+function renderRoute(){switch(app.route){case'library':return renderLibrary();case'reader':return renderReader();case'reviews':return renderReviews();case'versions':return renderVersions();case'gpt':return renderGpt();case'export':return renderExport();default:return renderLibrary()}}
+function requireActive(title='Откройте новеллу'){if(app.activeVersion)return false;$('routeHost').innerHTML=`<section class="page"><div class="empty-state"><h2>${esc(title)}</h2><p>Выберите новеллу в библиотеке или загрузите новый сценарий.</p><button class="btn primary" data-go-library>Открыть библиотеку</button></div></section>`;$('[data-go-library]')?.addEventListener('click',()=>setRoute('library'));return true}
 
-  function loadProgress(id) {
-    try { return JSON.parse(localStorage.getItem(progressKey(id)) || 'null'); } catch (_) { return null; }
-  }
-  function saveProgress() {
-    if (!currentNovel || !state) return;
-    try {
-      localStorage.setItem(progressKey(currentNovel.id), JSON.stringify(state));
-      els.saveBtn.textContent = 'Сохранено ✓';
-    } catch (_) { els.saveBtn.textContent = 'Ошибка сохранения'; }
-  }
+function renderLibrary(){const cards=app.novels.map(n=>{const v=getVersion(n.activeVersionId);if(!v)return'';const sess=getSessionForVersion(v.versionId),progress=sess?.timeline?.length?Math.min(100,Math.round(((v.content.scenes.findIndex(s=>s.id===(sess.timeline[sess.viewIndex]?.sceneId||sess.sceneId))+1)/v.content.scenes.length)*100)):0,open=(v.reviews||[]).filter(r=>!['Принято','Отклонено','Архив'].includes(r.status)).length,vers=app.versions.filter(x=>x.novelId===n.novelId).length;return`<article class="novel-card"><div class="novel-card-top"><div style="display:flex;gap:11px"><div class="novel-icon">${esc((n.title||'H')[0].toUpperCase())}</div><div><h3>${esc(n.title)}</h3><p>${esc(versionLabel(v))} · ${v.content.scenes.length} сцен · ${vers} ${plural(vers,'версия','версии','версий')}</p></div></div><span class="pill ${v.validation?.ok?'good':'bad'}">${v.validation?.ok?'Проверено':'Есть ошибки'}</span></div><div class="novel-meta"><div class="meta-box"><strong>${progress}%</strong><span>прочитано</span></div><div class="meta-box"><strong>${open}</strong><span>открытых замечаний</span></div></div><div class="progress"><i style="width:${progress}%"></i></div><div class="novel-card-actions"><button class="btn primary" data-open-novel="${esc(n.novelId)}">${sess?.timeline?.length?'Продолжить':'Открыть'}</button><button class="btn secondary" data-new-version="${esc(n.novelId)}">Новая версия</button></div></article>`}).join('');
+  $('routeHost').innerHTML=`<section class="page"><div class="page-head"><div><h1>Библиотека</h1><p>Сценарии, версии, прогресс вычитки и редакторские замечания хранятся локально в браузере.</p></div><div class="page-actions"><button id="uploadNovelBtn" class="btn primary">Загрузить новеллу</button></div></div><div class="toolbar"><input id="librarySearch" class="search-input" placeholder="Поиск по названию"><select id="libraryFilter" class="select"><option value="all">Все новеллы</option><option value="issues">С замечаниями</option><option value="errors">С ошибками validation</option></select></div><div id="libraryGrid" class="library-grid">${cards||`<div class="empty-state" style="grid-column:1/-1"><h2>Библиотека пуста</h2><p>Загрузите DOCX, JSON или ZIP с новым сценарием.</p><button class="btn primary" id="emptyUploadBtn">Загрузить новеллу</button></div>`}</div></section>`;
+  const file=()=>$('novelFileInput').click();$('uploadNovelBtn').addEventListener('click',file);$('emptyUploadBtn')?.addEventListener('click',file);document.querySelectorAll('[data-open-novel]').forEach(b=>b.addEventListener('click',()=>openNovel(b.dataset.openNovel)));document.querySelectorAll('[data-new-version]').forEach(b=>b.addEventListener('click',()=>{app.importTargetNovelId=b.dataset.newVersion;file()}));
+  $('librarySearch').addEventListener('input',filterLibrary);$('libraryFilter').addEventListener('change',filterLibrary);
+}
+function filterLibrary(){const q=$('librarySearch').value.trim().toLowerCase(),f=$('libraryFilter').value;document.querySelectorAll('.novel-card').forEach(card=>{const title=card.querySelector('h3')?.textContent.toLowerCase()||'',n=app.novels.find(x=>x.title.toLowerCase()===title),v=n?getVersion(n.activeVersionId):null,issues=(v?.reviews||[]).some(r=>!['Принято','Отклонено','Архив'].includes(r.status)),errs=!v?.validation?.ok;card.style.display=(!q||title.includes(q))&&(f==='all'||(f==='issues'&&issues)||(f==='errors'&&errs))?'':'none'})}
 
-  function createInitialState(novel) {
-    return {
-      schemaVersion: 1,
-      novelId: novel.id,
-      contentVersion: novel.contentVersion || null,
-      sceneId: novel.startScene || novel.scenes[0].id,
-      ip: 0,
-      branch: null,
-      pendingChoice: null,
-      vars: { HONESTY: 0, ATTRACTION: 0, TRUST: 0, PROFESSIONAL_COST: 0 },
-      history: [],
-      choices: [],
-      tech: { bg: '', cg: '', music: '', sfx: '', sprite: '', reaction: '', fade: '' },
-      ended: false,
-      lastDisplayed: null
-    };
-  }
+function renderReader(){if(requireActive())return;const groups=P.getChapterGroups(activeContent());const visited=new Set((app.session?.timeline||[]).map(e=>e.sceneId));$('routeHost').innerHTML=`<section class="reader-shell"><aside id="readerSide" class="reader-side"><div class="reader-side-head"><strong>${esc(app.activeNovel.title)}</strong><small>${esc(versionLabel(app.activeVersion))}</small></div><div class="reader-side-body"><input id="structureSearch" class="search-input structure-search" placeholder="Сцена или ID"><div id="structureTree">${groups.map(g=>`<div class="chapter-block"><button class="chapter-toggle"><span>${esc(g.title)}</span><span>${g.scenes.length}</span></button><div class="scene-list">${g.scenes.map(s=>{const count=(app.activeVersion.reviews||[]).filter(r=>r.fragmentId&&P.getFragmentRef(activeContent(),r.fragmentId)?.scene?.id===s.id&&r.status!=='Архив').length;return`<button class="scene-link ${s.id===currentReaderSceneId()?'active':''}" data-scene-link="${esc(s.id)}"><span>${visited.has(s.id)?'● ':''}${esc(s.id)} · ${esc(s.title)}</span><span class="count">${count?`💬 ${count}`:''}</span></button>`}).join('')}</div></div>`).join('')}</div></div></aside><section class="reader-main"><div class="reader-topbar"><button id="openStructureBtn" class="btn secondary small mobile-only">Структура</button><div class="reader-breadcrumb"><strong id="readerBreadcrumb">${esc(app.activeNovel.title)} · ${esc(versionLabel(app.activeVersion))}</strong><span id="readerSubcrumb"></span></div><div class="reader-top-actions"><span id="autosaveState" class="autosave">Автосохранение</span><button id="readerValidationBtn" class="btn secondary small">Validation</button><button id="openCommentsBtn" class="btn secondary small mobile-only">Замечания</button></div></div><div id="readerScroll" class="reader-scroll"><div id="readerContent"></div></div><div class="reader-bottom"><div class="left"><button id="replayBtn" class="nav-btn">Переиграть отсюда</button></div><div class="center"><button id="firstVisitedBtn" class="nav-btn">|← Первая</button><button id="backBtn" class="nav-btn mobile-keep">← Назад</button><button id="forwardBtn" class="nav-btn primary-next mobile-keep">Вперёд →</button><button id="lastVisitedBtn" class="nav-btn">Последняя →|</button></div><div class="right"><button id="returnStoryBtn" class="nav-btn hidden">Вернуться к прохождению</button></div></div></section><aside id="readerComments" class="reader-comments"><div class="reader-comments-head"><strong>Замечания</strong><small id="commentsSubhead">Текущий фрагмент</small></div><div id="readerCommentsBody" class="reader-comments-body"></div></aside></section>`;
+  wireReader();renderReaderCurrent();}
+function currentReaderSceneId(){if(app.editorCursorFragmentId)return P.getFragmentRef(activeContent(),app.editorCursorFragmentId)?.scene?.id||'';const e=app.session?.timeline?.[app.session.viewIndex];return e?.sceneId||app.session?.sceneId||''}
+function currentReaderEntry(){if(app.editorCursorFragmentId){const ref=P.getFragmentRef(activeContent(),app.editorCursorFragmentId);return ref?{kind:ref.step.type==='choice'?'choice':'fragment',sceneId:ref.scene.id,fragmentId:ref.step.fragmentId,direct:true}:null}return app.session?.timeline?.[app.session.viewIndex]||null}
+function fragmentForEntry(e){if(!e||e.kind==='end')return null;return P.getFragmentRef(activeContent(),e.fragmentId)}
+function wireReader(){
+  $('backBtn').addEventListener('click',viewBack);$('forwardBtn').addEventListener('click',viewForward);$('replayBtn').addEventListener('click',replayFromView);$('firstVisitedBtn').addEventListener('click',()=>{if(app.editorCursorFragmentId){const fs=P.flattenFragments(activeContent());if(fs[0]){app.editorCursorFragmentId=fs[0].fragmentId;renderReaderCurrent()}}else if(app.session.timeline.length){app.session.viewIndex=0;renderReaderCurrent();saveSession()}});$('lastVisitedBtn').addEventListener('click',()=>{app.editorCursorFragmentId=null;if(app.session.timeline.length){app.session.viewIndex=app.session.timeline.length-1;renderReaderCurrent();saveSession()}});$('returnStoryBtn').addEventListener('click',()=>{app.editorCursorFragmentId=null;renderReaderCurrent()});$('readerValidationBtn').addEventListener('click',showValidation);$('openStructureBtn').addEventListener('click',()=>toggleDrawer('readerSide'));$('openCommentsBtn').addEventListener('click',()=>toggleDrawer('readerComments'));
+  document.querySelectorAll('[data-scene-link]').forEach(b=>b.addEventListener('click',()=>openSceneForReview(b.dataset.sceneLink)));
+  $('structureSearch').addEventListener('input',()=>{const q=$('structureSearch').value.toLowerCase();document.querySelectorAll('[data-scene-link]').forEach(b=>b.style.display=!q||b.textContent.toLowerCase().includes(q)?'':'none')});
+}
+function toggleDrawer(id){$(id)?.classList.toggle('open')}
+function openSceneForReview(sceneId){const inTimeline=app.session.timeline.findIndex(e=>e.sceneId===sceneId&&e.fragmentId);if(inTimeline>=0){app.editorCursorFragmentId=null;app.session.viewIndex=inTimeline;renderReaderCurrent();saveSession()}else{const scene=findScene(sceneId);const first=P.flattenFragments({scenes:[scene]}).find(f=>f.type!=='tech');if(first){app.editorCursorFragmentId=first.fragmentId;renderReaderCurrent();toast('Редакторский просмотр: маршрут прохождения не изменён')}}$('readerSide')?.classList.remove('open')}
+function renderReaderCurrent(){if(!app.activeVersion||!$('readerContent'))return;const e=currentReaderEntry();if(!e){$('readerContent').innerHTML='<div class="empty-state"><h2>Начало истории</h2><p>Нажмите «Вперёд», чтобы начать чтение.</p></div>';return}if(e.kind==='end'){renderEndEntry(e);return}const ref=fragmentForEntry(e);if(!ref)return;const scene=ref.scene,step=ref.step,all=app.session.timeline,idx=app.session.viewIndex;let contexts=[];if(!app.editorCursorFragmentId){for(let i=Math.max(0,idx-3);i<idx;i++){const pe=all[i],pr=fragmentForEntry(pe);if(pr&&pe.kind==='fragment')contexts.push({entry:pe,ref:pr})}}const cue=sceneCue(scene),reviewCount=currentReviewCount(step.fragmentId),edited=editMap()[step.fragmentId]!=null;
+  $('readerSubcrumb').textContent=`${scene.chapterTitle} · ${scene.id} · ${scene.title}${app.editorCursorFragmentId?' · Редакторский просмотр':` · ${Math.max(1,idx+1)} / ${Math.max(1,all.length)}`}`;
+  $('readerContent').innerHTML=`<div class="scene-visual"><div class="scene-visual-copy"><strong>${esc(scene.title)}</strong><span>${esc(cue||scene.id)}</span></div></div><div class="reading-column"><div class="reading-context">${contexts.map(x=>fragmentHtml(x.ref.step,'context')).join('')}${fragmentHtml(step,'active',e)}</div><p class="selection-tip">Можно выделить часть текущего текста и нажать «Добавить замечание».</p></div>`;
+  $('backBtn').disabled=app.editorCursorFragmentId?isEditorEdge(-1):idx<=0;$('forwardBtn').disabled=e.kind==='choice'&&!e.selectedOptionId||app.editorCursorFragmentId&&isEditorEdge(1);$('replayBtn').disabled=!!app.editorCursorFragmentId;$('returnStoryBtn').classList.toggle('hidden',!app.editorCursorFragmentId);
+  document.querySelectorAll('[data-add-review]').forEach(b=>b.addEventListener('click',()=>openReviewDialog(b.dataset.addReview)));document.querySelectorAll('[data-edit-fragment]').forEach(b=>b.addEventListener('click',()=>openEditDialog(b.dataset.editFragment)));document.querySelectorAll('[data-choice-option]').forEach(b=>b.addEventListener('click',()=>chooseOption(b.dataset.choiceOption)));
+  renderReaderComments(step.fragmentId);document.querySelectorAll('[data-scene-link]').forEach(b=>b.classList.toggle('active',b.dataset.sceneLink===scene.id));
+  const rr=$('readerScroll');if(rr)rr.scrollTop=rr.scrollHeight;
+}
+function isEditorEdge(delta){const fs=P.flattenFragments(activeContent()).filter(f=>f.type!=='tech'),i=fs.findIndex(f=>f.fragmentId===app.editorCursorFragmentId);return !fs[i+delta]}
+function sceneCue(scene){const t=(scene.steps||[]).find(s=>s.type==='tech'&&(s.command==='CG'||s.command==='BG'));return t?.value||''}
+function fragmentHtml(step,cls,e=null){const text=currentText(step),count=currentReviewCount(step.fragmentId),edited=editMap()[step.fragmentId]!=null,speaker=step.type==='dialogue'&&step.speaker?`<span class="speaker">${esc(step.speaker)}</span>`:'',actions=cls==='active'?`<div class="fragment-actions"><button class="mini-icon" data-add-review="${esc(step.fragmentId)}" title="Добавить замечание">💬</button><button class="mini-icon" data-edit-fragment="${esc(step.fragmentId)}" title="Редактировать текст">✎</button></div>`:'';if(step.type==='choice'){const selected=e?.selectedOptionId||null,interactive=cls==='active'&&!app.editorCursorFragmentId&&!selected;return`<div class="fragment ${cls} choice" data-fragment="${esc(step.fragmentId)}">${actions}<div class="fragment-text"><strong>${esc(text||'Выбор')}</strong>${count?`<span class="review-dot">${count}</span>`:''}${edited?'<span class="edited-mark">изменено</span>':''}</div><div class="choice-box">${(step.options||[]).map(o=>interactive?`<button class="choice-btn" data-choice-option="${esc(o.id)}">${esc(o.label)}</button>`:`<div class="choice-btn ${selected===o.id?'selected':''}">${esc(o.label)}${selected===o.id?' ✓':''}</div>`).join('')}</div></div>`}return`<div class="fragment ${esc(step.type)} ${cls}" data-fragment="${esc(step.fragmentId)}">${actions}${speaker}<div class="fragment-text">${esc(text)}${count?`<span class="review-dot">${count}</span>`:''}${edited?'<span class="edited-mark">изменено</span>':''}</div></div>`}
+function renderEndEntry(e){$('readerSubcrumb').textContent='Конец прохождения';$('readerContent').innerHTML=`<div class="reading-column"><div class="empty-state"><h2>${esc(e.text||'Конец')}</h2><p>Можно вернуться назад, открыть другую сцену в редакторском режиме или начать новое прохождение.</p><button id="restartStoryBtn" class="btn primary">Начать сначала</button></div></div>`;$('restartStoryBtn').addEventListener('click',restartStory);renderReaderComments(null)}
+async function restartStory(){if(!confirm('Начать новое прохождение? Текущее будет сохранено в архиве сессий.'))return;const old=clone(app.session);old.sessionId=`session:${app.activeVersionId}:archive:${Date.now().toString(36)}`;old.archived=true;await DB.put('sessions',old);app.session=createInitialSession(app.activeVersion);await saveSession();await advanceLive()}
+function renderReaderComments(fragmentId){const host=$('readerCommentsBody');if(!host)return;const rs=fragmentId?currentReviews(fragmentId):[];$('commentsSubhead').textContent=fragmentId?`${rs.length} ${plural(rs.length,'замечание','замечания','замечаний')}`:'Нет активного фрагмента';host.innerHTML=rs.length?rs.map(reviewCardHtml).join(''):`<div class="empty-state" style="padding:28px 12px"><h2 style="font-size:15px">Замечаний нет</h2><p style="font-size:11px">Добавьте комментарий к текущей реплике или выделенному тексту.</p>${fragmentId?`<button class="btn secondary small" data-add-review="${esc(fragmentId)}">Добавить замечание</button>`:''}</div>`;host.querySelectorAll('[data-review-status]').forEach(s=>s.addEventListener('change',()=>updateReviewStatus(s.dataset.reviewStatus,s.value)));host.querySelectorAll('[data-review-jump]').forEach(b=>b.addEventListener('click',()=>openReaderToFragment(b.dataset.reviewJump)));host.querySelectorAll('[data-add-review]').forEach(b=>b.addEventListener('click',()=>openReviewDialog(b.dataset.addReview)))}
+function reviewCardHtml(r){return`<article class="review-card"><div class="review-card-head"><strong>${esc(r.category)}${r.severity==='critical'?' · Критично':''}</strong><span class="pill ${r.severity==='critical'?'critical':''}">${esc(r.status)}</span></div>${r.quotedText?`<blockquote>${esc(r.quotedText)}</blockquote>`:''}<p>${esc(r.comment)}</p><div class="review-card-actions"><select class="status-select" data-review-status="${esc(r.reviewId)}">${STATUS.map(s=>`<option ${s===r.status?'selected':''}>${esc(s)}</option>`).join('')}</select><button class="btn ghost small" data-review-jump="${esc(r.fragmentId)}">Перейти</button></div></article>`}
 
-  function openNovel(id, forceNew = false) {
-    currentNovel = novels.find(n => n.id === id);
-    if (!currentNovel) return;
-    const saved = !forceNew ? compatibleProgress(currentNovel) : null;
-    state = saved && !saved.ended ? saved : createInitialState(currentNovel);
-    if (!state.vars) state.vars = {};
-    if (!state.history) state.history = [];
-    els.libraryScreen.classList.add('hidden');
-    els.playerScreen.classList.remove('hidden');
-    els.novelTitleMini.textContent = currentNovel.title;
-    updateSceneChrome();
-    if (state.pendingChoice) {
-      const choice = findPendingChoice(state.pendingChoice);
-      if (choice) renderChoice(choice);
-      else { state.pendingChoice = null; advance(); }
-    } else if (state.lastDisplayed) {
-      renderDisplay(state.lastDisplayed, false);
-    } else {
-      advance();
-    }
-  }
+function selectedRangeForFragment(fragmentId){const sel=window.getSelection?.();if(!sel||sel.rangeCount===0||sel.isCollapsed)return null;const active=document.querySelector(`.fragment.active[data-fragment="${CSS.escape(fragmentId)}"] .fragment-text`);if(!active)return null;const range=sel.getRangeAt(0);if(!active.contains(range.commonAncestorContainer))return null;const quoted=sel.toString().trim();if(!quoted)return null;const text=active.innerText||'';const start=text.indexOf(quoted);return{quotedText:quoted,rangeStart:start>=0?start:null,rangeEnd:start>=0?start+quoted.length:null}}
+function openReviewDialog(fragmentId){const ref=P.getFragmentRef(activeContent(),fragmentId);if(!ref)return;const range=selectedRangeForFragment(fragmentId);app.reviewTarget={fragmentId,...(range||{})};$('reviewForm').reset();$('reviewDialogTitle').textContent='Добавить замечание';$('reviewQuotedWrap').classList.toggle('hidden',!range);$('reviewQuotedText').textContent=range?.quotedText||'';$('reviewDialog').showModal();setTimeout(()=>$('reviewComment').focus(),60)}
+async function saveReviewFromDialog(e){e.preventDefault();const t=app.reviewTarget;if(!t)return;const comment=$('reviewComment').value.trim();if(!comment){toast('Напишите комментарий');return}const r={reviewId:P.uid('RV'),versionId:app.activeVersionId,fragmentId:t.fragmentId,rangeStart:t.rangeStart??null,rangeEnd:t.rangeEnd??null,quotedText:t.quotedText||null,comment,category:$('reviewCategory').value,severity:$('reviewSeverity').value,status:'Открыто',createdAt:now(),updatedAt:now()};app.activeVersion.reviews=app.activeVersion.reviews||[];app.activeVersion.reviews.push(r);app.activeVersion.changeLog=app.activeVersion.changeLog||[];app.activeVersion.changeLog.push({changeId:P.uid('CH'),entityId:r.reviewId,operation:'review_create',after:clone(r),timestamp:now()});await saveVersion();$('reviewDialog').close();renderRoute();toast('Замечание сохранено')}
+async function updateReviewStatus(reviewId,status){const r=(app.activeVersion.reviews||[]).find(x=>x.reviewId===reviewId);if(!r)return;r.status=status;r.updatedAt=now();app.activeVersion.changeLog.push({changeId:P.uid('CH'),entityId:reviewId,operation:'review_status',after:{status},timestamp:now()});await saveVersion();if(app.route==='reader')renderReaderComments(r.fragmentId);else renderRoute()}
+function openEditDialog(fragmentId){const ref=P.getFragmentRef(activeContent(),fragmentId);if(!ref||ref.step.type==='tech')return;app.editTarget={fragmentId,step:ref.step};$('editOriginalText').textContent=sourceText(ref.step);$('editCurrentText').value=currentText(ref.step);$('editDialog').showModal();setTimeout(()=>$('editCurrentText').focus(),60)}
+async function saveEditFromDialog(e){e.preventDefault();const t=app.editTarget;if(!t)return;const val=$('editCurrentText').value.trim(),original=sourceText(t.step);app.activeVersion.edits=(app.activeVersion.edits||[]).filter(x=>x.fragmentId!==t.fragmentId);if(val!==original)app.activeVersion.edits.push({editId:P.uid('ED'),versionId:app.activeVersionId,fragmentId:t.fragmentId,originalText:original,editedText:val,createdAt:now()});app.activeVersion.changeLog=app.activeVersion.changeLog||[];app.activeVersion.changeLog.push({changeId:P.uid('CH'),entityId:t.fragmentId,operation:'text_edit',before:{text:currentText(t.step)},after:{text:val},timestamp:now()});await saveVersion();$('editDialog').close();renderRoute();toast(val===original?'Восстановлен оригинал':'Правка сохранена')}
+function restoreOriginalInDialog(){$('editCurrentText').value=$('editOriginalText').textContent}
 
-  function backToLibrary() {
-    saveProgress();
-    els.playerScreen.classList.add('hidden');
-    els.libraryScreen.classList.remove('hidden');
-    currentNovel = null;
-    state = null;
-    refreshLibrary();
-  }
+function renderReviews(){if(requireActive())return;const rs=app.activeVersion.reviews||[];$('routeHost').innerHTML=`<section class="page"><div class="page-head"><div><h1>Замечания</h1><p>Единая очередь литературной вычитки для версии «${esc(versionLabel(app.activeVersion))}».</p></div><div class="page-actions"><button id="nextReviewBtn" class="btn primary">Следующее замечание</button><button id="reviewsGptBtn" class="btn secondary">Подготовить для GPT</button></div></div><div class="list-page-grid"><div><div class="toolbar" style="margin-bottom:14px"><input id="reviewSearch" class="search-input" placeholder="Поиск в комментариях и тексте"><select id="reviewStatusFilter" class="select"><option value="all">Все статусы</option>${STATUS.map(s=>`<option>${esc(s)}</option>`).join('')}</select><select id="reviewCategoryFilter" class="select"><option value="all">Все категории</option>${['Стиль','Диалог','Логика','Темп','Персонаж','Повтор','Опечатка','Другое'].map(s=>`<option>${s}</option>`).join('')}</select></div><div id="reviewList" class="review-list">${rs.length?rs.map(reviewRowHtml).join(''):'<div class="empty-state"><h2>Замечаний пока нет</h2><p>Откройте режим чтения и добавьте комментарий к реплике или выделенному фрагменту.</p></div>'}</div></div><aside class="panel"><div class="panel-head"><h3>Сводка</h3></div><div class="panel-body"><div class="summary-big">${rs.filter(r=>!['Принято','Отклонено','Архив'].includes(r.status)).length}</div><div class="summary-label">требуют внимания</div><div class="filter-stack" style="margin-top:18px">${['Стиль','Диалог','Логика','Темп','Персонаж','Повтор','Опечатка','Другое'].map(c=>`<div style="display:flex;justify-content:space-between;font-size:12px"><span>${c}</span><strong>${rs.filter(r=>r.category===c&&r.status!=='Архив').length}</strong></div>`).join('')}</div></div></aside></div></section>`;wireReviewList()}
+function reviewRowHtml(r){const ref=P.getFragmentRef(activeContent(),r.fragmentId),st=ref?.step,text=st?currentText(st):'(фрагмент удалён)',orphan=!ref;return`<article class="review-row" data-review-row="${esc(r.reviewId)}"><span class="severity-dot ${r.severity==='critical'?'critical':''}"></span><div><h3>${esc(r.category)} · ${esc(ref?.scene?.id||'Удалённый фрагмент')} ${orphan?'<span class="pill bad">orphan</span>':''}</h3><div class="snippet">${esc(r.quotedText||text.slice(0,240))}</div><div class="comment">${esc(r.comment)}</div><div class="row-meta"><span>${fmtDate(r.updatedAt||r.createdAt)}</span><span>${esc(r.fragmentId)}</span>${r.textChangedSinceComment?'<span>текст изменён после комментария</span>':''}</div></div><div class="review-row-actions"><select class="status-select" data-review-status="${esc(r.reviewId)}">${STATUS.map(s=>`<option ${s===r.status?'selected':''}>${esc(s)}</option>`).join('')}</select><button class="btn secondary small" data-review-jump="${esc(r.fragmentId)}" ${orphan?'disabled':''}>Открыть</button></div></article>`}
+function wireReviewList(){const filter=()=>{const q=$('reviewSearch').value.toLowerCase(),sf=$('reviewStatusFilter').value,cf=$('reviewCategoryFilter').value;document.querySelectorAll('[data-review-row]').forEach(el=>{const r=app.activeVersion.reviews.find(x=>x.reviewId===el.dataset.reviewRow),ok=(!q||el.textContent.toLowerCase().includes(q))&&(sf==='all'||r.status===sf)&&(cf==='all'||r.category===cf);el.style.display=ok?'':'none'})};$('reviewSearch').addEventListener('input',filter);$('reviewStatusFilter').addEventListener('change',filter);$('reviewCategoryFilter').addEventListener('change',filter);document.querySelectorAll('[data-review-status]').forEach(s=>s.addEventListener('change',()=>updateReviewStatus(s.dataset.reviewStatus,s.value)));document.querySelectorAll('[data-review-jump]').forEach(b=>b.addEventListener('click',()=>openReaderToFragment(b.dataset.reviewJump)));$('nextReviewBtn').addEventListener('click',()=>{const r=app.activeVersion.reviews.find(x=>!['Принято','Отклонено','Архив'].includes(x.status)&&P.getFragmentRef(activeContent(),x.fragmentId));if(r)openReaderToFragment(r.fragmentId);else toast('Открытых замечаний нет')});$('reviewsGptBtn').addEventListener('click',prepareGptPackage)}
+function openReaderToFragment(fragmentId){if(!P.getFragmentRef(activeContent(),fragmentId)){toast('Фрагмент отсутствует в этой версии');return}app.editorCursorFragmentId=fragmentId;setRoute('reader')}
 
-  function restartNovel() {
-    if (!currentNovel) return;
-    if (!confirm('Начать новеллу сначала? Текущий прогресс будет заменён.')) return;
-    state = createInitialState(currentNovel);
-    saveProgress();
-    hideChoices();
-    updateSceneChrome();
-    advance();
-  }
+function renderVersions(){if(requireActive())return;const vs=app.versions.filter(v=>v.novelId===app.activeNovelId).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));if(app.versionDiff)return renderVersionDiff();$('routeHost').innerHTML=`<section class="page"><div class="page-head"><div><h1>Версии</h1><p>Старые редакции не перезаписываются. Ручные правки можно зафиксировать как новую immutable-версию.</p></div><div class="page-actions">${(app.activeVersion.edits||[]).length?'<button id="finalizeManualBtn" class="btn primary">Создать версию из ручных правок</button>':''}<button id="importVersionBtn" class="btn secondary">Импортировать новую версию</button></div></div><div class="version-list">${vs.map(v=>`<article class="version-row"><span class="version-node ${v.versionId===app.activeVersionId?'current':''}"></span><div><h3>${esc(versionLabel(v))} ${v.versionId===app.activeVersionId?'<span class="pill good">Current</span>':''}</h3><p>${esc(v.sourceType||'import')} · ${fmtDate(v.createdAt)}${v.parentVersionId?` · родитель: ${esc(versionLabel(getVersion(v.parentVersionId)))}`:''}</p><div class="stat-row"><span class="pill">${v.content.scenes.length} сцен</span><span class="pill">${(v.reviews||[]).length} замечаний</span><span class="pill ${v.validation?.ok?'good':'bad'}">${v.validation?.ok?'validation OK':'validation errors'}</span></div></div><div class="version-actions"><button class="btn secondary small" data-open-version="${esc(v.versionId)}">Открыть</button>${v.parentVersionId?`<button class="btn secondary small" data-diff-version="${esc(v.versionId)}">Сравнить</button>`:''}</div></article>`).join('')}</div></section>`;document.querySelectorAll('[data-open-version]').forEach(b=>b.addEventListener('click',()=>openVersion(b.dataset.openVersion)));document.querySelectorAll('[data-diff-version]').forEach(b=>b.addEventListener('click',()=>{app.versionDiff={to:b.dataset.diffVersion,from:getVersion(b.dataset.diffVersion)?.parentVersionId};renderVersions()}));$('finalizeManualBtn')?.addEventListener('click',finalizeManualVersion);$('importVersionBtn').addEventListener('click',()=>{app.importTargetNovelId=app.activeNovelId;$('novelFileInput').click()})}
+function flattenVersionText(v){const map=new Map(),em=editMap(v);for(const f of P.flattenFragments(v.content)){map.set(f.fragmentId,{...f,text:Object.prototype.hasOwnProperty.call(em,f.fragmentId)?em[f.fragmentId]:f.text})}return map}
+function computeVersionDiff(a,b){const A=flattenVersionText(a),B=flattenVersionText(b),ids=new Set([...A.keys(),...B.keys()]),out=[];for(const id of ids){const x=A.get(id),y=B.get(id);if(!x)out.push({kind:'added',id,before:'',after:y.text,ref:y});else if(!y)out.push({kind:'deleted',id,before:x.text,after:'',ref:x});else if(x.text!==y.text)out.push({kind:'modified',id,before:x.text,after:y.text,ref:y})}return out}
+function renderVersionDiff(){const a=getVersion(app.versionDiff.from),b=getVersion(app.versionDiff.to);if(!a||!b){app.versionDiff=null;return renderVersions()}const diffs=computeVersionDiff(a,b);$('routeHost').innerHTML=`<section class="page"><div class="page-head"><div><h1>Сравнение версий</h1><p>${esc(versionLabel(a))} → ${esc(versionLabel(b))} · ${diffs.length} изменений</p></div><div class="page-actions"><button id="closeVersionDiff" class="btn secondary">Назад к версиям</button></div></div><div class="diff-list">${diffs.length?diffs.map(d=>`<article class="diff-card"><div class="diff-head"><span>${esc(d.kind)} · ${esc(d.ref?.sceneId||'')}</span><span class="mono">${esc(d.id)}</span></div><div class="diff-grid"><div class="diff-pane">${esc(d.before||'—')}</div><div class="diff-pane">${esc(d.after||'—')}</div></div></article>`).join(''):'<div class="empty-state"><h2>Текстовых различий нет</h2></div>'}</div></section>`;$('closeVersionDiff').addEventListener('click',()=>{app.versionDiff=null;renderVersions()})}
+function applyEditsToContent(content,edits){const n=clone(content),m={};for(const e of edits||[])m[e.fragmentId]=e.editedText;for(const f of P.flattenFragments(n)){if(!Object.prototype.hasOwnProperty.call(m,f.fragmentId))continue;if(f.step.type==='choice')f.step.prompt=m[f.fragmentId];else f.step.text=m[f.fragmentId]}return n}
+async function finalizeManualVersion(){const label=prompt('Название новой версии:',`manual-${new Date().toISOString().slice(0,10)}`);if(!label)return;const content=applyEditsToContent(app.activeVersion.content,app.activeVersion.edits),versionId=`${app.activeNovelId}::${slug(label)}::${Date.now().toString(36)}`,val=P.validateNovel(content),reviews=(app.activeVersion.reviews||[]).map(r=>({...clone(r),versionId,textChangedSinceComment:false})),v={versionId,novelId:app.activeNovelId,label,parentVersionId:app.activeVersionId,sourceType:'manual',createdAt:now(),updatedAt:now(),content:val.novel,validation:stripValidation(val),reviews,edits:[],changeLog:[],status:'ready'};await DB.put('versions',v);app.activeNovel.activeVersionId=versionId;await DB.put('novels',app.activeNovel);await reloadCollections();await openNovel(app.activeNovelId,versionId);toast('Новая версия создана')}
 
-  function currentSequence() {
-    if (!state.branch) {
-      const scene = findScene(state.sceneId);
-      return scene ? { steps: scene.steps, ip: state.ip, kind: 'scene' } : null;
-    }
-    const scene = findScene(state.sceneId);
-    const choice = scene?.steps.find(s => s.type === 'choice' && s.id === state.branch.choiceId);
-    const opt = choice?.options.find(o => o.id === state.branch.optionId);
-    return opt ? { steps: opt.steps, ip: state.branch.ip, kind: 'branch', option: opt } : null;
-  }
+function renderGpt(){if(requireActive())return;const cs=app.candidates.filter(c=>c.baseVersionId===app.activeVersionId||c.novelId===app.activeNovelId).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));$('routeHost').innerHTML=`<section class="page"><div class="page-head"><div><h1>GPT round-trip</h1><p>Безопасный файловый цикл: приложение готовит структурированный пакет, а исправления возвращаются как proposals и не применяются автоматически.</p></div><div class="page-actions"><button id="prepareGptBtn" class="btn primary">Подготовить для GPT</button><button id="importGptBtn" class="btn secondary">Загрузить исправления GPT</button></div></div><div class="gpt-workflow"><div class="workflow-card"><div class="num">1</div><h3>Подготовить пакет</h3><p>Открытые замечания + контекст + stable IDs + правила редактуры.</p></div><div class="workflow-card"><div class="num">2</div><h3>Исправить в GPT</h3><p>Загрузите ZIP в ChatGPT и попросите вернуть revision.json, сохраняя ID.</p></div><div class="workflow-card"><div class="num">3</div><h3>Проверить diff</h3><p>Примите или отклоните каждую предложенную правку и создайте новую версию.</p></div></div><div class="panel"><div class="panel-head"><h2>Кандидаты исправлений</h2><span class="muted">${cs.length}</span></div><div class="panel-body">${cs.length?`<div class="gpt-log">${cs.map(c=>`<div class="gpt-log-row"><div><strong>${esc(c.label||'GPT revision')}</strong><span>${fmtDate(c.createdAt)} · ${c.changes.length} изменений · ${esc(c.status)}</span></div><button class="btn secondary small" data-open-candidate="${esc(c.candidateId)}">Проверить</button></div>`).join('')}</div>`:'<div class="empty-state" style="padding:34px 18px"><h2 style="font-size:16px">Исправления ещё не загружены</h2><p>Сначала экспортируйте пакет и обработайте его в GPT.</p></div>'}</div></div><div class="panel" style="margin-top:16px"><div class="panel-head"><h2>Журнал GPT-циклов</h2></div><div class="panel-body"><div class="gpt-log">${app.cycles.filter(c=>c.novelId===app.activeNovelId).sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||'')).map(c=>`<div class="gpt-log-row"><div><strong>${esc(c.scopeLabel||'Редакционный пакет')}</strong><span>${fmtDate(c.createdAt)} · ${c.reviewCount} замечаний · ${esc(c.status)}</span></div><span class="pill">${esc(versionLabel(getVersion(c.baseVersionId)))}</span></div>`).join('')||'<span class="muted">Журнал пуст.</span>'}</div></div></div></section>`;$('prepareGptBtn').addEventListener('click',prepareGptPackage);$('importGptBtn').addEventListener('click',()=>$('gptFileInput').click());document.querySelectorAll('[data-open-candidate]').forEach(b=>b.addEventListener('click',()=>openCandidate(b.dataset.openCandidate)))}
+function reviewContext(review){const ref=P.getFragmentRef(activeContent(),review.fragmentId);if(!ref)return null;const fs=P.flattenFragments({scenes:[ref.scene]}).filter(f=>f.type!=='tech'),i=fs.findIndex(f=>f.fragmentId===review.fragmentId),before=fs.slice(Math.max(0,i-2),i).map(f=>currentText(f.step)),after=fs.slice(i+1,i+3).map(f=>currentText(f.step));return{sceneId:ref.scene.id,sceneTitle:ref.scene.title,chapter:ref.scene.chapterTitle,fragmentId:review.fragmentId,type:ref.step.type,speaker:ref.step.speaker||'',originalText:currentText(ref.step),contextBefore:before,contextAfter:after}}
+async function prepareGptPackage(){if(!app.activeVersion)return;let reviews=(app.activeVersion.reviews||[]).filter(r=>!['Принято','Отклонено','Архив'].includes(r.status)&&P.getFragmentRef(activeContent(),r.fragmentId));if(!reviews.length){toast('Нет открытых замечаний для экспорта');return}const request={schemaVersion:1,requestId:P.uid('GPTREQ'),novelId:app.activeNovelId,title:app.activeNovel.title,baseVersionId:app.activeVersionId,baseVersionLabel:versionLabel(app.activeVersion),createdAt:now(),scope:'open_reviews',reviews:reviews.map(r=>({...r,...reviewContext(r)})),rules:{preserveStableIds:true,doNotChangeBranching:true,responseFile:'revision.json'},expectedResponse:{baseVersionId:app.activeVersionId,changes:[{fragmentId:'FR_...',originalText:'...',revisedText:'...',reason:'...',reviewIds:['RV_...']}]}};const manifest={package:'HEARTLINE GPT Revision Request',schemaVersion:1,requestId:request.requestId,novelId:app.activeNovelId,baseVersionId:app.activeVersionId,files:['manifest.json','revision_request.json','prompt.md']};const prompt=`# HEARTLINE — литературная редактура\n\nИсправь только перечисленные в revision_request.json проблемные фрагменты.\n\nОбязательные правила:\n- сохраняй fragmentId, Scene ID, Choice ID и Option ID без изменений;\n- не меняй GOTO, IF, SET, flags, route metadata и структуру ветвлений, если это отдельно не запрошено;\n- сохраняй характер персонажей и функцию сцены;\n- не применяй изменения «молча»: верни только proposed changes;\n- итоговый ответ сохрани в файле revision.json.\n\nФормат revision.json:\n\`\`\`json\n{\n  "baseVersionId": "${app.activeVersionId}",\n  "changes": [{\n    "fragmentId": "FR_...",\n    "originalText": "...",\n    "revisedText": "...",\n    "reason": "...",\n    "reviewIds": ["RV_..."]\n  }]\n}\n\`\`\`\n`;
+  const bytes=X.makeGptPackageBytes({manifest,request,prompt});X.downloadBytes(bytes,`${slug(app.activeNovel.title)}_${slug(versionLabel(app.activeVersion))}_GPT.zip`,'application/zip');for(const r of reviews){if(r.status==='Открыто'){r.status='Передано GPT';r.updatedAt=now()}}await saveVersion();const cycle={cycleId:P.uid('CYCLE'),novelId:app.activeNovelId,baseVersionId:app.activeVersionId,scope:'open_reviews',scopeLabel:'Открытые замечания',reviewCount:reviews.length,status:'подготовлено',createdAt:now()};await DB.put('gptCycles',cycle);app.cycles.push(cycle);if(app.route==='gpt')renderGpt();toast(`Пакет для GPT готов: ${reviews.length} замечаний`)}
+async function handleGptFile(file){try{const bytes=new Uint8Array(await file.arrayBuffer());let data;if(file.name.toLowerCase().endsWith('.json'))data=JSON.parse(await file.text());else{const zip=new P.MiniZip(bytes.buffer),entries=zip.list().filter(e=>e.name.toLowerCase().endsWith('.json'));let chosen=entries.find(e=>/(^|\/)revision\.json$/i.test(e.name))||entries.find(e=>/(revision|response)/i.test(e.name));if(!chosen)throw new Error('В ZIP не найден revision.json');data=JSON.parse(new TextDecoder().decode(await zip.read(chosen)))}if(!data.baseVersionId||!Array.isArray(data.changes))throw new Error('Неверный формат revision: нужны baseVersionId и changes[]');const base=getVersion(data.baseVersionId);if(!base)throw new Error(`Базовая версия ${data.baseVersionId} не найдена локально`);const em=editMap(base),changes=data.changes.map(ch=>{const ref=P.getFragmentRef(base.content,ch.fragmentId),cur=ref?(Object.prototype.hasOwnProperty.call(em,ch.fragmentId)?em[ch.fragmentId]:sourceText(ref.step)):null,conflict=cur===null||String(cur)!==String(ch.originalText??cur);return{...ch,decision:'pending',conflict,currentText:cur}});const c={candidateId:P.uid('CAND'),novelId:base.novelId,baseVersionId:base.versionId,label:data.label||`GPT ${new Date().toLocaleDateString('ru-RU')}`,createdAt:now(),status:'Требует проверки',changes};await DB.put('candidates',c);app.candidates.push(c);app.activeNovelId=base.novelId;app.activeNovel=getNovel(base.novelId);app.activeVersionId=base.versionId;app.activeVersion=base;openCandidate(c.candidateId);toast(`Загружено ${changes.length} предложений GPT`)}catch(e){toast(`Ошибка импорта GPT: ${e.message}`)}finally{$('gptFileInput').value=''}}
+function openCandidate(id){const c=app.candidates.find(x=>x.candidateId===id);if(!c)return;app.candidateOpenId=id;renderCandidateDialog(c);$('candidateDialog').showModal()}
+function renderCandidateDialog(c){const base=getVersion(c.baseVersionId);$('candidateDialogBody').innerHTML=`<div class="validation-summary"><span class="pill">${c.changes.length} изменений</span><span class="pill warn">${c.changes.filter(x=>x.decision==='pending').length} ожидают решения</span><span class="pill bad">${c.changes.filter(x=>x.conflict).length} конфликтов</span></div><div class="diff-list">${c.changes.map((ch,i)=>`<article class="diff-card" data-candidate-change="${i}"><div class="diff-head"><span>${esc(P.getFragmentRef(base.content,ch.fragmentId)?.scene?.id||'Фрагмент не найден')} · ${esc(ch.reason||'Без пояснения')}</span><span class="mono">${esc(ch.fragmentId)}</span></div><div class="diff-grid"><div class="diff-pane">${esc(ch.currentText??ch.originalText??'—')}</div><div class="diff-pane">${esc(ch.revisedText??'—')}</div></div>${ch.conflict?'<div class="diff-reason" style="color:#a02b2b">Конфликт: originalText из ответа GPT не совпадает с текущим текстом базовой версии.</div>':''}<div class="diff-actions"><button type="button" class="btn ${ch.decision==='accepted'?'accent':'secondary'} small" data-cand-accept="${i}" ${ch.conflict?'disabled':''}>Принять</button><button type="button" class="btn ${ch.decision==='rejected'?'danger':'secondary'} small" data-cand-reject="${i}">Отклонить</button><span class="pill">${esc(ch.decision)}</span></div></article>`).join('')}</div>`;$('candidateDialogFooter').innerHTML=`<button type="button" id="acceptAllCandidate" class="btn secondary">Принять все без конфликтов</button><button type="button" id="finalizeCandidateBtn" class="btn primary">Создать новую версию</button>`;document.querySelectorAll('[data-cand-accept]').forEach(b=>b.addEventListener('click',()=>setCandidateDecision(c,Number(b.dataset.candAccept),'accepted')));document.querySelectorAll('[data-cand-reject]').forEach(b=>b.addEventListener('click',()=>setCandidateDecision(c,Number(b.dataset.candReject),'rejected')));$('acceptAllCandidate').addEventListener('click',async()=>{for(const ch of c.changes)if(!ch.conflict&&ch.decision==='pending')ch.decision='accepted';await DB.put('candidates',c);renderCandidateDialog(c)});$('finalizeCandidateBtn').addEventListener('click',()=>finalizeCandidate(c))}
+async function setCandidateDecision(c,i,d){c.changes[i].decision=d;await DB.put('candidates',c);renderCandidateDialog(c)}
+function setStepText(step,text){if(step.type==='choice')step.prompt=text;else step.text=text}
+async function finalizeCandidate(c){const pending=c.changes.filter(x=>x.decision==='pending');if(pending.length&&!confirm(`Осталось ${pending.length} нерешённых изменений. Создать версию только из принятых?`))return;const base=getVersion(c.baseVersionId);if(!base)return;let content=applyEditsToContent(base.content,base.edits);for(const ch of c.changes.filter(x=>x.decision==='accepted')){const ref=P.getFragmentRef(content,ch.fragmentId);if(ref)setStepText(ref.step,ch.revisedText)}const label=prompt('Название новой версии:',`gpt-${new Date().toISOString().slice(0,10)}`);if(!label)return;const versionId=`${base.novelId}::${slug(label)}::${Date.now().toString(36)}`,val=P.validateNovel(content),acceptedIds=new Set(c.changes.filter(x=>x.decision==='accepted').flatMap(x=>x.reviewIds||[])),reviews=(base.reviews||[]).map(r=>({...clone(r),versionId,status:acceptedIds.has(r.reviewId)?'Принято':r.status,textChangedSinceComment:false})),v={versionId,novelId:base.novelId,label,parentVersionId:base.versionId,sourceType:'gpt',createdAt:now(),updatedAt:now(),content:val.novel,validation:stripValidation(val),reviews,edits:[],changeLog:[],status:'ready'};await DB.put('versions',v);c.status='Завершено';c.resultVersionId=versionId;await DB.put('candidates',c);const n=getNovel(base.novelId);n.activeVersionId=versionId;await DB.put('novels',n);$('candidateDialog').close();await reloadCollections();await openNovel(base.novelId,versionId);toast('Новая версия из правок GPT создана')}
 
-  function setSequenceIp(kind, ip) {
-    if (kind === 'branch') state.branch.ip = ip;
-    else state.ip = ip;
-  }
+function renderExport(){if(requireActive())return;const v=app.activeVersion,val=P.validateNovel(applyEditsToContent(v.content,v.edits));$('routeHost').innerHTML=`<section class="page"><div class="page-head"><div><h1>Экспорт и резервная копия</h1><p>Выгружайте актуальный master-сценарий, замечания и полный локальный проект.</p></div><div class="page-actions"><button id="exportValidationBtn" class="btn secondary">Проверить validation</button></div></div><div class="validation-summary"><span class="pill ${val.ok?'good':'bad'}">${val.ok?'Validation OK':`${val.errors.length} ошибок`}</span><span class="pill warn">${val.warnings.length} предупреждений</span><span class="pill">${val.stats.scenes} сцен</span><span class="pill">${val.stats.fragments} фрагментов</span></div><div class="export-grid"><article class="export-card"><div><h3>Master DOCX</h3><p>Текущая версия с ручными правками, сценарными стилями и stable bookmarks.</p></div><button id="exportDocxBtn" class="btn primary" ${val.ok?'':'disabled'}>Выгрузить DOCX</button></article><article class="export-card"><div><h3>HEARTLINE JSON</h3><p>Каноническое структурированное представление текущей версии.</p></div><button id="exportJsonBtn" class="btn secondary">Выгрузить JSON</button></article><article class="export-card"><div><h3>Замечания CSV</h3><p>Таблица для внешней редакторской работы и архива.</p></div><button id="exportCsvBtn" class="btn secondary">Выгрузить CSV</button></article><article class="export-card"><div><h3>Пакет для GPT</h3><p>Открытые замечания, контекст и prompt.md в ZIP.</p></div><button id="exportGptBtn" class="btn secondary">Подготовить ZIP</button></article><article class="export-card"><div><h3>Backup ZIP</h3><p>Все новеллы, версии, замечания, GPT-кандидаты и прогресс.</p></div><button id="exportBackupBtn" class="btn secondary">Создать backup</button></article><article class="export-card"><div><h3>Восстановить backup</h3><p>Импорт backup.json/ZIP. Можно объединить или заменить локальную базу.</p></div><button id="restoreBackupBtn" class="btn secondary">Восстановить</button></article></div>${!val.ok?'<div class="panel" style="margin-top:16px"><div class="panel-body"><strong>Master DOCX заблокирован.</strong><p class="muted">Исправьте критические ошибки validation перед утверждением master.</p></div></div>':''}</section>`;
+  $('exportValidationBtn').addEventListener('click',showValidation);$('exportDocxBtn').addEventListener('click',()=>exportDocx(val));$('exportJsonBtn').addEventListener('click',exportJson);$('exportCsvBtn').addEventListener('click',exportCsv);$('exportGptBtn').addEventListener('click',prepareGptPackage);$('exportBackupBtn').addEventListener('click',exportBackup);$('restoreBackupBtn').addEventListener('click',()=>$('backupFileInput').click())}
+function masterContent(){return applyEditsToContent(app.activeVersion.content,app.activeVersion.edits)}
+function exportDocx(validation){if(!validation.ok){toast('DOCX заблокирован: есть ошибки validation');return}X.downloadMasterDocx(masterContent(),{},`${slug(app.activeNovel.title)}_${slug(versionLabel(app.activeVersion))}_master.docx`)}
+function exportJson(){const n=masterContent();n.exportMeta={versionId:app.activeVersionId,label:versionLabel(app.activeVersion),exportedAt:now()};X.downloadJson(n,`${slug(app.activeNovel.title)}_${slug(versionLabel(app.activeVersion))}.json`)}
+function exportCsv(){const rows=(app.activeVersion.reviews||[]).map(r=>{const ref=P.getFragmentRef(activeContent(),r.fragmentId),st=ref?.step;return{novelId:app.activeNovelId,versionId:app.activeVersionId,chapter:ref?.scene?.chapterTitle||'',sceneId:ref?.scene?.id||'',fragmentId:r.fragmentId,textRange:r.quotedText||'',speakerType:st?`${st.speaker||''} ${st.type}`.trim():'',originalText:st?sourceText(st):'',currentText:st?currentText(st):'',comment:r.comment,category:r.category,severity:r.severity,status:r.status,createdAt:r.createdAt,updatedAt:r.updatedAt,reviewId:r.reviewId}}),cols=[['novelId','Novel ID'],['versionId','Version ID'],['chapter','Chapter'],['sceneId','Scene ID'],['fragmentId','Fragment ID'],['textRange','Text range'],['speakerType','Speaker/Type'],['originalText','Original text'],['currentText','Current text'],['comment','Comment'],['category','Category'],['severity','Severity'],['status','Status'],['createdAt','Created at'],['updatedAt','Updated at'],['reviewId','Review ID']].map(([key,label])=>({key,label}));X.downloadText(X.toCsv(rows,cols),`${slug(app.activeNovel.title)}_reviews.csv`,'text/csv;charset=utf-8')}
+async function exportBackup(){const payload=await DB.exportAll();X.downloadBytes(X.makeBackupBytes(payload),`HEARTLINE_backup_${new Date().toISOString().slice(0,10)}.zip`,'application/zip');toast('Backup создан')}
+async function handleBackupFile(file){try{let payload;if(file.name.toLowerCase().endsWith('.json'))payload=JSON.parse(await file.text());else{const bytes=new Uint8Array(await file.arrayBuffer()),zip=new P.MiniZip(bytes.buffer),e=zip.list().find(x=>/(^|\/)backup\.json$/i.test(x.name));if(!e)throw new Error('backup.json в ZIP не найден');payload=JSON.parse(new TextDecoder().decode(await zip.read(e)))}const replace=confirm('Нажмите OK, чтобы ЗАМЕНИТЬ локальные данные backup-ом. Нажмите Отмена, чтобы ОБЪЕДИНИТЬ данные.');await DB.importAll(payload,{replace});await reloadCollections();clearActive();setRoute('library');toast('Backup восстановлен')}catch(e){toast(`Ошибка backup: ${e.message}`)}finally{$('backupFileInput').value=''}}
 
-  function advance() {
-    if (!currentNovel || !state) return;
-    if (state.ended) { backToLibrary(); return; }
-    if (state.pendingChoice) return;
+function showValidation(){if(!app.activeVersion)return;const v=P.validateNovel(masterContent());$('validationDialogBody').innerHTML=`<div class="validation-summary"><span class="pill ${v.ok?'good':'bad'}">${v.ok?'OK':`${v.errors.length} ошибок`}</span><span class="pill warn">${v.warnings.length} предупреждений</span><span class="pill">${v.stats.scenes} сцен</span><span class="pill">${v.stats.fragments} фрагментов</span><span class="pill">${v.stats.choices} выборов</span><span class="pill">${v.stats.gotos} GOTO</span></div><div class="validation-list">${v.errors.map(x=>`<div class="validation-item error"><strong>Ошибка</strong><br>${esc(x)}</div>`).join('')}${v.warnings.map(x=>`<div class="validation-item warning"><strong>Предупреждение</strong><br>${esc(x)}</div>`).join('')}${v.ok&&!v.warnings.length?'<div class="validation-item"><strong>Сценарий прошёл проверку без замечаний.</strong></div>':''}</div>`;$('validationDialog').showModal()}
 
-    let safety = 0;
-    while (safety++ < 500) {
-      const seq = currentSequence();
-      if (!seq) { endWithMessage('Не удалось восстановить ветку.'); return; }
-      if (seq.ip >= seq.steps.length) {
-        if (seq.kind === 'branch') {
-          const fallback = seq.option?.fallbackGoto || null;
-          state.branch = null;
-          if (fallback) { jumpTo(resolveGoto(fallback)); continue; }
-          endWithMessage('Ветка завершилась без перехода.');
-          return;
-        }
-        endWithMessage('Сцена завершилась без перехода.');
-        return;
-      }
+async function handleNovelFiles(files){try{const body=$('importDialogBody'),footer=$('importDialogFooter');body.innerHTML='<p>Разбираю сценарий и запускаю validation…</p>';$('importDialog').showModal();const result=await P.importFiles(files);app.importDraft=result;const val=result.validation||P.validateNovel(result.novel),target=app.importTargetNovelId||null;body.innerHTML=`<div class="validation-summary"><span class="pill">${esc(result.report.format||'DOCX')}</span><span class="pill">${val.stats.scenes} сцен</span><span class="pill">${val.stats.fragments} фрагментов</span><span class="pill">${val.stats.choices} выборов</span><span class="pill ${val.ok?'good':'bad'}">${val.ok?'Validation OK':`${val.errors.length} ошибок`}</span></div><div class="form-stack"><label class="field"><span>Название версии</span><input id="importVersionLabel" value="${esc(result.novel.contentVersion||`import-${new Date().toISOString().slice(0,10)}`)}"></label><label class="field"><span>Куда импортировать</span><select id="importTargetSelect"><option value="new">Новая новелла</option>${app.novels.map(n=>`<option value="${esc(n.novelId)}" ${target===n.novelId?'selected':''}>Новая версия: ${esc(n.title)}</option>`).join('')}</select></label><div class="panel"><div class="panel-head"><h3>Validation report</h3></div><div class="panel-body"><p style="margin-top:0">Файлов: ${result.report.files?.length||1} · исключено «НЕ ЭКСПОРТИРОВАТЬ»: ${result.report.excluded||0}</p>${val.errors.slice(0,8).map(x=>`<div class="validation-item error">${esc(x)}</div>`).join('')}${val.warnings.slice(0,8).map(x=>`<div class="validation-item warning">${esc(x)}</div>`).join('')}${val.errors.length+val.warnings.length>8?`<p class="muted">Показаны первые 8 сообщений из ${val.errors.length+val.warnings.length}.</p>`:''}</div></div></div>`;footer.innerHTML='<button type="button" id="cancelImportBtn" class="btn secondary">Отмена</button><button type="button" id="confirmImportBtn" class="btn primary">Создать версию</button>';$('cancelImportBtn').addEventListener('click',()=>{$('importDialog').close();app.importDraft=null;app.importTargetNovelId=null});$('confirmImportBtn').addEventListener('click',confirmImportDraft)}catch(e){$('importDialogBody').innerHTML=`<div class="validation-item error"><strong>Импорт не выполнен</strong><br>${esc(e.message)}</div>`;$('importDialogFooter').innerHTML='<button class="btn primary" onclick="document.getElementById(\'importDialog\').close()">Закрыть</button>'}finally{$('novelFileInput').value=''}}
+async function confirmImportDraft(){const d=app.importDraft;if(!d)return;const target=$('importTargetSelect').value,label=$('importVersionLabel').value.trim()||`v-${Date.now().toString(36)}`,incoming=P.normalizeNovel(d.novel);let novelId,parent=null,title=incoming.title;if(target==='new'){novelId=incoming.id||`novel-${Date.now().toString(36)}`;if(getNovel(novelId))novelId=`${novelId}-${Date.now().toString(36)}`}else{novelId=target;const n=getNovel(novelId);parent=getVersion(n.activeVersionId);title=n.title;incoming.id=novelId}const versionId=`${novelId}::${slug(label)}::${Date.now().toString(36)}`,val=P.validateNovel(incoming);let reviews=[];if(parent){const nextIds=new Set(P.flattenFragments(val.novel).map(f=>f.fragmentId));const nextMap=new Map(P.flattenFragments(val.novel).map(f=>[f.fragmentId,f]));reviews=(parent.reviews||[]).map(r=>{const old=P.getFragmentRef(parent.content,r.fragmentId),next=nextMap.get(r.fragmentId),oldText=old?currentTextForVersion(old.step,parent):null,nextText=next?next.text:null;return{...clone(r),versionId,orphaned:!nextIds.has(r.fragmentId),textChangedSinceComment:!!next&&oldText!==nextText,updatedAt:now()}})}const v={versionId,novelId,label,parentVersionId:parent?.versionId||null,sourceType:d.report.format?.toLowerCase().includes('json')?'json':'docx',createdAt:now(),updatedAt:now(),content:val.novel,validation:stripValidation(val),reviews,edits:[],changeLog:[],status:'ready'};await DB.put('versions',v);let nr=getNovel(novelId);if(!nr)nr={novelId,title,activeVersionId:versionId,createdAt:now(),lastOpenedAt:null};else nr.activeVersionId=versionId;await DB.put('novels',nr);$('importDialog').close();app.importDraft=null;app.importTargetNovelId=null;await reloadCollections();await openNovel(novelId,versionId);toast('Версия импортирована')}
+function currentTextForVersion(step,v){const m=editMap(v);return Object.prototype.hasOwnProperty.call(m,step.fragmentId)?m[step.fragmentId]:sourceText(step)}
 
-      const idx = seq.ip;
-      const step = seq.steps[idx];
-      setSequenceIp(seq.kind, idx + 1);
+function openSearch(){if(!app.activeVersion){toast('Сначала откройте новеллу');return}$('globalSearchInput').value='';$('globalSearchResults').innerHTML='<span class="muted">Введите минимум 2 символа.</span>';$('searchDialog').showModal();setTimeout(()=>$('globalSearchInput').focus(),50)}
+function searchNow(){const q=$('globalSearchInput').value.trim().toLowerCase();if(q.length<2){$('globalSearchResults').innerHTML='<span class="muted">Введите минимум 2 символа.</span>';return}const rows=P.flattenFragments(activeContent()).filter(f=>{const t=`${f.sceneId} ${f.fragmentId} ${f.speaker} ${currentText(f.step)}`.toLowerCase();return t.includes(q)}).slice(0,80);$('globalSearchResults').innerHTML=rows.length?rows.map(f=>`<button type="button" class="search-result" data-search-fragment="${esc(f.fragmentId)}"><strong>${esc(f.chapterTitle)} · ${esc(f.sceneId)} · ${esc(f.speaker||f.type)}</strong><span>${esc(currentText(f.step).slice(0,300))}</span></button>`).join(''):'<span class="muted">Ничего не найдено.</span>';document.querySelectorAll('[data-search-fragment]').forEach(b=>b.addEventListener('click',()=>{$('searchDialog').close();openReaderToFragment(b.dataset.searchFragment)}))}
 
-      if (step.type === 'choice') {
-        state.pendingChoice = { sceneId: state.sceneId, choiceId: step.id };
-        saveProgress();
-        renderChoice(step);
-        return;
-      }
-
-      if (step.type === 'tech') {
-        if (step.command === 'IF') {
-          const ok = evalCondition(step.value);
-          if (!ok) {
-            const explicitScope = Number.isInteger(step.scope) && step.scope >= 0 ? step.scope : null;
-            const scope = explicitScope !== null ? explicitScope : computeIfScope(seq.steps, idx);
-            setSequenceIp(seq.kind, Math.min(seq.steps.length, idx + 1 + scope));
-          }
-          continue;
-        }
-        const paused = executeTech(step);
-        if (paused || state.ended) return;
-        continue;
-      }
-
-      if (step.type === 'dialogue' || step.type === 'narration' || step.type === 'thought') {
-        state.lastDisplayed = { ...step, sceneId: state.sceneId };
-        pushHistory(step);
-        renderDisplay(step, true);
-        saveProgress();
-        updateDebug();
-        return;
-      }
-    }
-    endWithMessage('Защитная остановка: слишком много технических переходов подряд.');
-  }
-
-  function computeIfScope(steps, ifIndex) {
-    const hard = new Set(['BG','MUSIC','SFX','SPRITE','CG','FADE','GOTO','CHOICE','SYSTEM','REACTION']);
-    let hardEnd = steps.length;
-    let nextIf = -1;
-    for (let i = ifIndex + 1; i < steps.length; i++) {
-      const s = steps[i];
-      if (s.type === 'tech' && s.command === 'IF') { nextIf = i; break; }
-      if (s.type === 'tech' && hard.has(s.command)) { hardEnd = i; break; }
-    }
-    if (nextIf >= 0) return Math.max(0, nextIf - ifIndex - 1);
-
-    // If this is the last IF in a consecutive callback run, mirror the previous
-    // callback's approximate length and leave the remainder as common text.
-    let prevHard = -1, prevIf = -1;
-    for (let i = ifIndex - 1; i >= 0; i--) {
-      const s = steps[i];
-      if (s.type === 'tech' && hard.has(s.command)) { prevHard = i; break; }
-      if (s.type === 'tech' && s.command === 'IF') { prevIf = i; break; }
-    }
-    if (prevIf > prevHard) {
-      const previousLen = ifIndex - prevIf - 1;
-      return Math.min(previousLen, Math.max(0, hardEnd - ifIndex - 1));
-    }
-
-    // Common production pattern: IF false -> SET flag -> continue common text.
-    let k = ifIndex + 1;
-    while (k < steps.length && steps[k].type === 'tech' && (steps[k].command === 'SET' || steps[k].command === 'CLEAR')) k++;
-    if (k > ifIndex + 1) return k - ifIndex - 1;
-    return Math.max(0, hardEnd - ifIndex - 1);
-  }
-
-  function evalCondition(expr) {
-    const s = String(expr || '').trim().replace(/[.;]+$/, '');
-    let m = s.match(/^([A-Z0-9_]+)\s*=\s*(TRUE|FALSE)$/i);
-    if (m) return boolVar(m[1]) === (m[2].toUpperCase() === 'TRUE');
-    m = s.match(/^([A-Z0-9_]+)\s*(>=|<=|>|<|=)\s*(-?\d+)$/i);
-    if (m) {
-      const a = Number(getVar(m[1]) || 0), b = Number(m[3]);
-      return ({'>':a>b,'<':a<b,'>=':a>=b,'<=':a<=b,'=':a===b})[m[2]];
-    }
-    return true;
-  }
-
-  function executeTech(step) {
-    const cmd = step.command, value = step.value || '';
-    switch (cmd) {
-      case 'BG': state.tech.bg = value; updateBackdrop(); break;
-      case 'CG': state.tech.cg = value; updateBackdrop(); break;
-      case 'MUSIC': state.tech.music = value; break;
-      case 'SFX': state.tech.sfx = value; break;
-      case 'SPRITE': state.tech.sprite = value; break;
-      case 'REACTION': state.tech.reaction = value; break;
-      case 'FADE': state.tech.fade = value; flashFade(); break;
-      case 'SET': applySet(value); break;
-      case 'CLEAR': applyClear(value); break;
-      case 'SYSTEM': executeSystem(value); break;
-      case 'GOTO': jumpTo(resolveGoto(value)); break;
-      default: break;
-    }
-    updateDebug();
-    return false;
-  }
-
-  function applySet(value) {
-    const s = value.trim().replace(/[.;]+$/, '');
-    let m = s.match(/^([A-Z0-9_]+)\s*([+-]\d+)$/i);
-    if (m) { setVar(m[1], Number(getVar(m[1]) || 0) + Number(m[2])); return; }
-    m = s.match(/^([A-Z0-9_]+)\s*=\s*(TRUE|FALSE)$/i);
-    if (m) { setVar(m[1], m[2].toUpperCase() === 'TRUE'); return; }
-    m = s.match(/^([A-Z0-9_]+)\s*=\s*([A-Z0-9_]+)$/i);
-    if (m) { setVar(m[1], m[2]); return; }
-  }
-
-  function applyClear(value) {
-    for (const part of value.split(';')) {
-      const key = part.trim().replace(/[.;]+$/, '');
-      if (key) setVar(key, false);
-    }
-  }
-
-  function executeSystem(value) {
-    const v = value.trim();
-    if (/^Сравнить\s+HONESTY/i.test(v)) {
-      evaluateRoute();
-      return;
-    }
-    if (/^END\s+ROUTE_/i.test(v)) {
-      const route = (v.match(/ROUTE_[A-Z]+/i) || [''])[0];
-      state.ended = true;
-      state.lastDisplayed = { type: 'narration', text: `Конец маршрута ${route.replace('ROUTE_','')}.`, sceneId: state.sceneId };
-      renderDisplay(state.lastDisplayed, false);
-      els.tapHint.textContent = 'нажмите, чтобы вернуться в библиотеку';
-      saveProgress();
-      return;
-    }
-    if (/^FLAG_[A-Z0-9_]+\s*=/i.test(v)) {
-      for (const part of v.split(';')) applySet(part.trim());
-    }
-  }
-
-  function evaluateRoute() {
-    const scores = [
-      ['ROUTE_EQUAL', Number(getVar('HONESTY') || 0)],
-      ['ROUTE_FIRE', Number(getVar('ATTRACTION') || 0)],
-      ['ROUTE_MASK', Number(getVar('TRUST') || 0)]
-    ].sort((a,b) => b[1] - a[1]);
-    if (scores[0][1] - scores[1][1] >= 2 && scores.filter(x => x[1] === scores[0][1]).length === 1) {
-      setVar('ROUTE_ID', scores[0][0]);
-      setVar('DIRECT_ROUTE_CHOICE', false);
-    } else {
-      setVar('ROUTE_ID', '');
-      setVar('DIRECT_ROUTE_CHOICE', true);
-    }
-  }
-
-  function resolveGoto(raw) {
-    let target = String(raw || '').trim().replace(/[.;]+$/, '');
-    if (/соответствующая маршрутная сцена/i.test(target)) {
-      if (boolVar('FLAG_PACT_EQUAL')) return 'CH03_SC03_EQUAL';
-      if (boolVar('FLAG_PACT_FIRE')) return 'CH03_SC03_FIRE';
-      if (boolVar('FLAG_PACT_MASK')) return 'CH03_SC03_MASK';
-      return 'CH03_SC03_EQUAL';
-    }
-    if (/согласно ROUTE_ID/i.test(target)) {
-      const route = getVar('ROUTE_ID');
-      if (route === 'ROUTE_EQUAL') return 'CH06_SC05_EQUAL';
-      if (route === 'ROUTE_FIRE') return 'CH06_SC05_FIRE';
-      if (route === 'ROUTE_MASK') return 'CH06_SC05_MASK';
-      return 'CH06_SC04_DIRECT';
-    }
-    return target;
-  }
-
-  function jumpTo(target) {
-    if (!target) return;
-    const scene = findScene(target);
-    if (!scene) {
-      endWithMessage(`Не найден переход: ${target}`);
-      return;
-    }
-    state.sceneId = target;
-    state.ip = 0;
-    state.branch = null;
-    state.pendingChoice = null;
-    state.lastDisplayed = null;
-    state.tech.cg = '';
-    updateSceneChrome();
-  }
-
-  function renderDisplay(step, animate) {
-    hideChoices();
-    const scene = findScene(state.sceneId);
-    els.sceneLabel.textContent = scene?.title || state.sceneId;
-    els.dialoguePanel.classList.toggle('is-thought', step.type === 'thought');
-    els.dialoguePanel.classList.toggle('is-narration', step.type === 'narration');
-    if (step.type === 'dialogue') {
-      els.speakerName.textContent = step.speaker || '';
-      els.speakerName.classList.toggle('hidden', !step.speaker);
-      els.thoughtBadge.classList.add('hidden');
-    } else if (step.type === 'thought') {
-      els.speakerName.textContent = 'СОФИЯ';
-      els.speakerName.classList.remove('hidden');
-      els.thoughtBadge.classList.remove('hidden');
-    } else {
-      els.speakerName.textContent = '';
-      els.speakerName.classList.add('hidden');
-      els.thoughtBadge.classList.add('hidden');
-    }
-    els.dialogueText.textContent = step.text || '';
-    els.tapHint.textContent = state.ended ? 'нажмите, чтобы вернуться в библиотеку' : 'нажмите, чтобы продолжить';
-    if (animate) {
-      els.dialoguePanel.animate([{opacity:.45, transform:'translateY(6px)'},{opacity:1, transform:'translateY(0)'}], {duration:180, easing:'ease-out'});
-    }
-    updateSceneChrome();
-  }
-
-  function renderChoice(choice) {
-    els.choicePrompt.textContent = choice.prompt || 'Выбор';
-    els.choiceOptions.innerHTML = '';
-    choice.options.forEach((opt, idx) => {
-      const btn = document.createElement('button');
-      btn.className = 'choice-option';
-      btn.textContent = opt.label;
-      btn.addEventListener('click', () => chooseOption(choice, opt));
-      els.choiceOptions.appendChild(btn);
-    });
-    els.choicePanel.classList.remove('hidden');
-    els.dialoguePanel.classList.add('hidden');
-  }
-
-  function hideChoices() {
-    els.choicePanel.classList.add('hidden');
-    els.dialoguePanel.classList.remove('hidden');
-  }
-
-  function chooseOption(choice, opt) {
-    state.pendingChoice = null;
-    state.branch = { choiceId: choice.id, optionId: opt.id, ip: 0 };
-    state.choices.push({ sceneId: state.sceneId, choiceId: choice.id, optionId: opt.id, label: opt.label, at: Date.now() });
-    state.history.push({ type: 'choice', speaker: 'ВЫБОР', text: opt.label, sceneId: state.sceneId });
-    if (state.history.length > 400) state.history = state.history.slice(-400);
-    hideChoices();
-    saveProgress();
-    advance();
-  }
-
-  function findPendingChoice(ref) {
-    const scene = currentNovel?.scenes.find(s => s.id === ref.sceneId);
-    return scene?.steps.find(s => s.type === 'choice' && s.id === ref.choiceId) || null;
-  }
-
-  function pushHistory(step) {
-    const last = state.history[state.history.length - 1];
-    const item = { type: step.type, speaker: step.speaker || '', text: step.text, sceneId: state.sceneId };
-    if (last && last.type === item.type && last.text === item.text && last.sceneId === item.sceneId) return;
-    state.history.push(item);
-    if (state.history.length > 400) state.history = state.history.slice(-400);
-  }
-
-  function updateSceneChrome() {
-    if (!currentNovel || !state) return;
-    const scene = findScene(state.sceneId);
-    els.sceneTitleMini.textContent = scene ? `${scene.id} · ${scene.title}` : state.sceneId;
-    els.sceneLabel.textContent = scene?.title || state.sceneId;
-    const idx = Math.max(0, currentNovel.scenes.findIndex(s => s.id === state.sceneId));
-    els.progressBar.style.width = `${Math.min(100, Math.max(2, ((idx + 1) / currentNovel.scenes.length) * 100))}%`;
-    updateBackdrop();
-    updateDebug();
-  }
-
-  function updateBackdrop() {
-    if (!state || !currentNovel) return;
-    const scene = findScene(state.sceneId);
-    const seed = `${state.sceneId}|${state.tech.bg}|${state.tech.cg}`;
-    els.sceneBackdrop.style.setProperty('--hue', String(hashHue(seed)));
-    const cue = state.tech.cg || state.tech.bg || '';
-    els.visualCue.textContent = cue;
-    els.sceneLabel.textContent = scene?.title || state.sceneId;
-  }
-
-  function flashFade() {
-    els.sceneBackdrop.animate([{filter:'brightness(1)'},{filter:'brightness(.35)'},{filter:'brightness(1)'}], {duration:500, easing:'ease-in-out'});
-  }
-
-  function endWithMessage(message) {
-    state.ended = true;
-    state.lastDisplayed = { type: 'narration', text: message, sceneId: state.sceneId };
-    renderDisplay(state.lastDisplayed, false);
-    els.tapHint.textContent = 'нажмите, чтобы вернуться в библиотеку';
-    saveProgress();
-  }
-
-  function showHistory() {
-    els.historyList.innerHTML = (state?.history || []).map(h => `<div class="history-item ${h.type === 'choice' ? 'history-choice' : ''}">
-      ${h.speaker ? `<div class="history-speaker">${escapeHtml(h.speaker)}</div>` : ''}
-      <div class="history-text">${escapeHtml(h.text)}</div>
-    </div>`).join('') || '<div class="muted">История пока пуста.</div>';
-    els.historyDialog.showModal();
-    setTimeout(() => els.historyDialog.scrollTo(0, els.historyDialog.scrollHeight), 0);
-  }
-
-  function updateDebug() {
-    if (!currentNovel || !state) return;
-    const scene = findScene(state.sceneId);
-    els.debugScene.textContent = JSON.stringify({ sceneId: state.sceneId, title: scene?.title, ip: state.ip, branch: state.branch, pendingChoice: state.pendingChoice }, null, 2);
-    const sorted = Object.fromEntries(Object.entries(state.vars || {}).sort(([a],[b]) => a.localeCompare(b)));
-    els.debugVars.textContent = JSON.stringify(sorted, null, 2);
-    els.debugTech.textContent = JSON.stringify(state.tech || {}, null, 2);
-  }
-
-  function showDebug() {
-    updateDebug();
-    els.sceneBackdrop.classList.add('debug-on');
-    els.debugDialog.showModal();
-  }
-
-  function renderSceneList(filter = '') {
-    if (!currentNovel) return;
-    const q = filter.trim().toLowerCase();
-    const list = currentNovel.scenes.filter(s => !q || s.id.toLowerCase().includes(q) || s.title.toLowerCase().includes(q));
-    els.sceneList.innerHTML = list.map(s => `<button class="scene-jump" data-scene="${escapeHtml(s.id)}"><strong>${escapeHtml(s.id)}</strong><span>${escapeHtml(s.title)}</span></button>`).join('');
-    els.sceneList.querySelectorAll('[data-scene]').forEach(btn => btn.addEventListener('click', () => {
-      state.sceneId = btn.dataset.scene; state.ip = 0; state.branch = null; state.pendingChoice = null; state.lastDisplayed = null; state.ended = false;
-      els.sceneDialog.close(); els.debugDialog.close(); els.sceneBackdrop.classList.remove('debug-on'); updateSceneChrome(); saveProgress(); advance();
-    }));
-  }
-
-  async function handleImport(files) {
-    els.importTitle.textContent = 'Разбор сценария';
-    els.importStatus.innerHTML = 'Читаю DOCX и стили абзацев…';
-    els.importDialog.showModal();
-    try {
-      const { novel, report } = await window.HEARTLINEParser.importFiles(files);
-      persistImportedNovel(novel);
-      refreshLibrary();
-      els.importStatus.innerHTML = `<div class="ok"><strong>Импорт завершён.</strong></div>
-        <p>Файлов DOCX: ${report.files.length}<br>Сцен: ${report.scenes}<br>Выборов: ${report.choices}<br>Игровых абзацев: ${report.paragraphs}<br><strong>Исключено по стилю «НЕ ЭКСПОРТИРОВАТЬ…»: ${report.excluded}</strong></p>
-        <p class="muted">Новелла добавлена в библиотеку и хранится локально на устройстве.</p>`;
-    } catch (err) {
-      els.importStatus.innerHTML = `<div class="error"><strong>Импорт не выполнен.</strong><br>${escapeHtml(err.message || String(err))}</div>`;
-    } finally {
-      els.fileInput.value = '';
-    }
-  }
-
-  function persistImportedNovel(novel) {
-    const index = loadIndex().filter(x => x.id !== novel.id);
-    try {
-      localStorage.setItem(novelKey(novel.id), JSON.stringify(novel));
-      index.push({ id: novel.id, title: novel.title, addedAt: Date.now() });
-      saveIndex(index);
-    } catch (err) {
-      throw new Error('Не удалось сохранить новеллу локально. Возможно, браузер ограничил объём хранилища.');
-    }
-  }
-
-  function deleteNovel(id) {
-    const novel = novels.find(n => n.id === id);
-    if (!novel || id === BUILTIN.id) return;
-    if (!confirm(`Удалить «${novel.title}» и её прогресс с этого устройства?`)) return;
-    localStorage.removeItem(novelKey(id));
-    localStorage.removeItem(progressKey(id));
-    saveIndex(loadIndex().filter(x => x.id !== id));
-    refreshLibrary();
-  }
-
-  async function handleJsonImport(file) {
-    try {
-      const data = JSON.parse(await file.text());
-      const novel = window.HEARTLINEParser.validateNovel(data);
-      if (novel.id === BUILTIN.id) novel.id = `${novel.id}-${Date.now().toString(36)}`;
-      persistImportedNovel(novel);
-      refreshLibrary();
-      toast('JSON добавлен в библиотеку');
-    } catch (err) { toast(`Ошибка JSON: ${err.message}`); }
-    els.jsonInput.value = '';
-  }
-
-  function downloadJson(obj, filename) {
-    const blob = new Blob([JSON.stringify(obj, null, 2)], {type:'application/json'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-  }
-
-  function toast(text) {
-    clearTimeout(toastTimer);
-    els.toast.textContent = text;
-    els.toast.classList.remove('hidden');
-    toastTimer = setTimeout(() => els.toast.classList.add('hidden'), 2200);
-  }
-
-  function wireUi() {
-    els.importBtn.addEventListener('click', () => els.fileInput.click());
-    els.importJsonBtn.addEventListener('click', () => els.jsonInput.click());
-    els.fileInput.addEventListener('change', () => { if (els.fileInput.files.length) handleImport(els.fileInput.files); });
-    els.jsonInput.addEventListener('change', () => { if (els.jsonInput.files[0]) handleJsonImport(els.jsonInput.files[0]); });
-    els.backToLibraryBtn.addEventListener('click', backToLibrary);
-    els.dialoguePanel.addEventListener('click', advance);
-    els.restartBtn.addEventListener('click', restartNovel);
-    els.saveBtn.addEventListener('click', () => { saveProgress(); toast('Прогресс сохранён'); });
-    els.historyBtn.addEventListener('click', showHistory);
-    els.debugBtn.addEventListener('click', showDebug);
-    els.jumpSceneBtn.addEventListener('click', () => { renderSceneList(); els.sceneDialog.showModal(); });
-    els.sceneSearch.addEventListener('input', () => renderSceneList(els.sceneSearch.value));
-    els.exportStateBtn.addEventListener('click', () => currentNovel && state && downloadJson(state, `${currentNovel.id}-state.json`));
-    els.exportNovelBtn.addEventListener('click', () => currentNovel && downloadJson(currentNovel, `${currentNovel.id}.json`));
-    document.querySelectorAll('[data-close]').forEach(btn => btn.addEventListener('click', () => {
-      const d = $(btn.dataset.close); if (d?.open) d.close();
-    }));
-    els.debugDialog.addEventListener('close', () => els.sceneBackdrop.classList.remove('debug-on'));
-
-    window.addEventListener('keydown', (e) => {
-      if (els.playerScreen.classList.contains('hidden')) return;
-      if (e.key === ' ' || e.key === 'ArrowRight' || e.key === 'Enter') { if (!state?.pendingChoice) { e.preventDefault(); advance(); } }
-      if (e.key === 'Escape' && !document.querySelector('dialog[open]')) backToLibrary();
-    });
-
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault(); deferredInstall = e; els.installBtn.classList.remove('hidden');
-    });
-    els.installBtn.addEventListener('click', async () => {
-      if (deferredInstall) { deferredInstall.prompt(); await deferredInstall.userChoice; deferredInstall = null; els.installBtn.classList.add('hidden'); }
-      else els.installDialog.showModal();
-    });
-  }
-
-  async function registerPwa() {
-    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-      try { await navigator.serviceWorker.register('./sw.js'); } catch (_) {}
-    }
-    const isiOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
-    if (isiOS && !navigator.standalone) els.installBtn.classList.remove('hidden');
-  }
-
-  wireUi();
-  refreshLibrary();
-  registerPwa();
+function wireGlobal(){document.querySelectorAll('.nav-item').forEach(b=>b.addEventListener('click',()=>setRoute(b.dataset.route)));$('brandBtn').addEventListener('click',()=>setRoute('library'));$('globalSearchBtn').addEventListener('click',openSearch);$('globalSearchInput').addEventListener('input',searchNow);$('novelFileInput').addEventListener('change',()=>{if($('novelFileInput').files.length)handleNovelFiles($('novelFileInput').files)});$('gptFileInput').addEventListener('change',()=>{const f=$('gptFileInput').files[0];if(f)handleGptFile(f)});$('backupFileInput').addEventListener('change',()=>{const f=$('backupFileInput').files[0];if(f)handleBackupFile(f)});$('reviewForm').addEventListener('submit',saveReviewFromDialog);$('editForm').addEventListener('submit',saveEditFromDialog);$('restoreOriginalBtn').addEventListener('click',restoreOriginalInDialog);$('confirmReplayBtn').addEventListener('click',e=>{e.preventDefault();confirmReplay()});window.addEventListener('keydown',e=>{if(app.route!=='reader'||document.querySelector('dialog[open]'))return;if(e.altKey&&e.key==='ArrowLeft'){e.preventDefault();viewBack()}if(e.altKey&&e.key==='ArrowRight'){e.preventDefault();viewForward()}});window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();app.deferredInstall=e;$('installBtn').classList.remove('hidden')});$('installBtn').addEventListener('click',async()=>{if(app.deferredInstall){app.deferredInstall.prompt();await app.deferredInstall.userChoice;app.deferredInstall=null;$('installBtn').classList.add('hidden')}})}
+async function registerPwa(){if('serviceWorker'in navigator&&(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'))try{const reg=await navigator.serviceWorker.register('./sw.js');reg.addEventListener?.('updatefound',()=>toast('Доступна новая версия приложения. Обновите страницу после установки.'))}catch(_){} }
+async function init(){try{await DB.open();await ensureBuiltin();await migrateLegacy();await reloadCollections();wireGlobal();renderLibrary();registerPwa()}catch(e){$('routeHost').innerHTML=`<section class="page"><div class="empty-state"><h2>Не удалось запустить HEARTLINE</h2><p>${esc(e.message||String(e))}</p></div></section>`}}
+init();
 })();

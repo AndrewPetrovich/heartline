@@ -2,149 +2,134 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
-  <meta name="theme-color" content="#120b10" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#ffffff" />
+  <meta name="color-scheme" content="light" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="HEARTLINE" />
-  <title>HEARTLINE Reader</title>
+  <title>HEARTLINE Novel Editor</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div id="app">
-    <section id="libraryScreen" class="screen library-screen">
-      <header class="library-header">
-        <div>
-          <div class="eyebrow">HEARTLINE</div>
-          <h1>Novel Player</h1>
-          <p>Мобильный проигрыватель интерактивных мини-новелл.</p>
-        </div>
-        <button id="installBtn" class="icon-btn hidden" aria-label="Установить приложение">＋</button>
-      </header>
-
-      <div class="library-actions">
-        <button id="importBtn" class="primary-btn">Импортировать новеллу</button>
-        <button id="importJsonBtn" class="secondary-btn">Импорт JSON</button>
+  <div id="app" class="app-shell">
+    <header class="app-header">
+      <button id="brandBtn" class="brand-button" type="button" aria-label="Открыть библиотеку">
+        <span class="brand-mark">H</span>
+        <span class="brand-copy"><strong>HEARTLINE</strong><small>Novel Editor</small></span>
+      </button>
+      <nav id="mainNav" class="main-nav" aria-label="Основная навигация">
+        <button data-route="library" class="nav-item active">Библиотека</button>
+        <button data-route="reader" class="nav-item">Читать</button>
+        <button data-route="reviews" class="nav-item">Замечания</button>
+        <button data-route="versions" class="nav-item">Версии</button>
+        <button data-route="gpt" class="nav-item">GPT</button>
+        <button data-route="export" class="nav-item">Экспорт</button>
+      </nav>
+      <div class="header-actions">
+        <button id="globalSearchBtn" class="icon-text-btn" type="button" title="Поиск">⌕ <span>Поиск</span></button>
+        <button id="installBtn" class="icon-text-btn hidden" type="button">＋ <span>Установить</span></button>
       </div>
+    </header>
 
-      <div class="import-rule">
-        <strong>Правило импорта DOCX:</strong> абзацы со стилями, начинающимися с
-        <code>НЕ ЭКСПОРТИРОВАТЬ</code>, не попадают в игру.
-      </div>
-
-      <main>
-        <div class="section-row">
-          <h2>Библиотека</h2>
-          <span id="libraryCount" class="muted"></span>
-        </div>
-        <div id="novelGrid" class="novel-grid"></div>
-      </main>
-      <footer class="library-footer">Работает локально в браузере. Сценарии не отправляются на сервер.</footer>
-    </section>
-
-    <section id="playerScreen" class="screen player-screen hidden">
-      <div id="sceneBackdrop" class="scene-backdrop">
-        <div class="grain"></div>
-        <div class="vignette"></div>
-        <header class="player-topbar">
-          <button id="backToLibraryBtn" class="round-btn" aria-label="В библиотеку">‹</button>
-          <div class="scene-meta">
-            <div id="novelTitleMini" class="scene-novel-title"></div>
-            <div id="sceneTitleMini" class="scene-title-mini"></div>
-          </div>
-          <button id="debugBtn" class="round-btn" aria-label="Debug">⌘</button>
-        </header>
-
-        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
-
-        <div class="stage" id="stage">
-          <div id="sceneLabel" class="scene-label"></div>
-          <div id="visualCue" class="visual-cue"></div>
-        </div>
-
-        <div id="choicePanel" class="choice-panel hidden" aria-live="polite">
-          <div id="choicePrompt" class="choice-prompt"></div>
-          <div id="choiceOptions" class="choice-options"></div>
-        </div>
-
-        <button id="dialoguePanel" class="dialogue-panel" aria-label="Следующая реплика">
-          <div class="dialogue-head">
-            <span id="speakerName" class="speaker-name"></span>
-            <span id="thoughtBadge" class="thought-badge hidden">мысль</span>
-          </div>
-          <div id="dialogueText" class="dialogue-text"></div>
-          <div class="continue-row">
-            <span id="tapHint">нажмите, чтобы продолжить</span>
-            <span class="continue-arrow">⌄</span>
-          </div>
-        </button>
-
-        <nav class="player-toolbar">
-          <button id="historyBtn" class="toolbar-btn">История</button>
-          <button id="restartBtn" class="toolbar-btn">Сначала</button>
-          <button id="saveBtn" class="toolbar-btn">Сохранено ✓</button>
-        </nav>
-      </div>
-    </section>
+    <main id="routeHost" class="route-host" tabindex="-1"></main>
   </div>
 
-  <input id="fileInput" type="file" accept=".docx,.zip" multiple hidden />
-  <input id="jsonInput" type="file" accept=".json" hidden />
+  <input id="novelFileInput" type="file" accept=".docx,.json,.zip" multiple hidden />
+  <input id="gptFileInput" type="file" accept=".json,.zip" hidden />
+  <input id="backupFileInput" type="file" accept=".zip,.json" hidden />
 
-  <dialog id="historyDialog" class="sheet-dialog">
-    <div class="sheet-head">
-      <div><div class="eyebrow">ПРОХОЖДЕНИЕ</div><h3>История</h3></div>
-      <button class="close-btn" data-close="historyDialog">×</button>
-    </div>
-    <div id="historyList" class="history-list"></div>
+  <dialog id="importDialog" class="modal modal-wide">
+    <form method="dialog" class="modal-card">
+      <header class="modal-head">
+        <div><span class="kicker">ИМПОРТ</span><h2>Новая версия сценария</h2></div>
+        <button value="cancel" class="icon-btn" aria-label="Закрыть">×</button>
+      </header>
+      <div id="importDialogBody" class="modal-body"></div>
+      <footer id="importDialogFooter" class="modal-footer"></footer>
+    </form>
   </dialog>
 
-  <dialog id="debugDialog" class="sheet-dialog debug-dialog">
-    <div class="sheet-head">
-      <div><div class="eyebrow">DEVELOPER MODE</div><h3>Debug</h3></div>
-      <button class="close-btn" data-close="debugDialog">×</button>
-    </div>
-    <div class="debug-actions">
-      <button id="jumpSceneBtn" class="secondary-btn">Перейти к сцене</button>
-      <button id="exportStateBtn" class="secondary-btn">Экспорт состояния</button>
-      <button id="exportNovelBtn" class="secondary-btn">Экспорт JSON новеллы</button>
-    </div>
-    <div class="debug-section"><h4>Текущая сцена</h4><pre id="debugScene"></pre></div>
-    <div class="debug-section"><h4>Переменные и флаги</h4><pre id="debugVars"></pre></div>
-    <div class="debug-section"><h4>Технический контекст</h4><pre id="debugTech"></pre></div>
+  <dialog id="reviewDialog" class="modal">
+    <form id="reviewForm" method="dialog" class="modal-card">
+      <header class="modal-head">
+        <div><span class="kicker">ВЫЧИТКА</span><h2 id="reviewDialogTitle">Добавить замечание</h2></div>
+        <button value="cancel" class="icon-btn" aria-label="Закрыть">×</button>
+      </header>
+      <div class="modal-body form-stack">
+        <div id="reviewQuotedWrap" class="quote-box hidden"><span>Выделенный текст</span><blockquote id="reviewQuotedText"></blockquote></div>
+        <label class="field"><span>Категория</span><select id="reviewCategory">
+          <option>Стиль</option><option>Диалог</option><option>Логика</option><option>Темп</option><option>Персонаж</option><option>Повтор</option><option>Опечатка</option><option>Другое</option>
+        </select></label>
+        <label class="field"><span>Важность</span><select id="reviewSeverity"><option value="normal">Обычное</option><option value="critical">Критичное</option></select></label>
+        <label class="field"><span>Комментарий</span><textarea id="reviewComment" rows="6" placeholder="Что именно нужно изменить и почему?"></textarea></label>
+      </div>
+      <footer class="modal-footer">
+        <button value="cancel" class="btn secondary">Отмена</button>
+        <button id="saveReviewBtn" value="default" class="btn primary">Сохранить замечание</button>
+      </footer>
+    </form>
   </dialog>
 
-  <dialog id="sceneDialog" class="sheet-dialog">
-    <div class="sheet-head">
-      <div><div class="eyebrow">DEBUG</div><h3>Сцены</h3></div>
-      <button class="close-btn" data-close="sceneDialog">×</button>
-    </div>
-    <input id="sceneSearch" class="search-input" placeholder="Поиск по ID или названию" />
-    <div id="sceneList" class="scene-list"></div>
+  <dialog id="editDialog" class="modal modal-wide">
+    <form id="editForm" method="dialog" class="modal-card">
+      <header class="modal-head">
+        <div><span class="kicker">РЕДАКТИРОВАНИЕ</span><h2>Редактировать текст</h2></div>
+        <button value="cancel" class="icon-btn" aria-label="Закрыть">×</button>
+      </header>
+      <div class="modal-body edit-grid">
+        <div class="edit-pane"><span class="pane-label">Оригинал</span><div id="editOriginalText" class="readonly-text"></div></div>
+        <label class="edit-pane field"><span class="pane-label">Текущая редакция</span><textarea id="editCurrentText" rows="12"></textarea></label>
+      </div>
+      <footer class="modal-footer split-footer">
+        <button id="restoreOriginalBtn" type="button" class="btn ghost">Восстановить оригинал</button>
+        <div><button value="cancel" class="btn secondary">Отмена</button><button id="saveEditBtn" value="default" class="btn primary">Сохранить правку</button></div>
+      </footer>
+    </form>
   </dialog>
 
-  <dialog id="importDialog" class="sheet-dialog import-dialog">
-    <div class="sheet-head">
-      <div><div class="eyebrow">ИМПОРТ</div><h3 id="importTitle">Разбор сценария</h3></div>
-      <button class="close-btn" data-close="importDialog">×</button>
-    </div>
-    <div id="importStatus" class="import-status"></div>
+  <dialog id="replayDialog" class="modal">
+    <form method="dialog" class="modal-card">
+      <header class="modal-head"><div><span class="kicker">МАРШРУТ</span><h2>Переиграть отсюда?</h2></div><button value="cancel" class="icon-btn">×</button></header>
+      <div class="modal-body"><p>Будет создана новая сессия прохождения от выбранного места. Уже прочитанная история останется в старой сессии.</p></div>
+      <footer class="modal-footer"><button value="cancel" class="btn secondary">Отмена</button><button id="confirmReplayBtn" value="default" class="btn danger">Переиграть отсюда</button></footer>
+    </form>
   </dialog>
 
-  <dialog id="installDialog" class="sheet-dialog">
-    <div class="sheet-head">
-      <div><div class="eyebrow">PWA</div><h3>Добавить на экран</h3></div>
-      <button class="close-btn" data-close="installDialog">×</button>
-    </div>
-    <p>На iPhone: откройте меню «Поделиться» → «На экран Домой». На Android используйте пункт «Установить приложение» в браузере.</p>
+  <dialog id="searchDialog" class="modal modal-wide">
+    <form method="dialog" class="modal-card">
+      <header class="modal-head"><div><span class="kicker">ПОИСК</span><h2>Поиск по новелле</h2></div><button value="cancel" class="icon-btn">×</button></header>
+      <div class="modal-body">
+        <input id="globalSearchInput" class="search-input large" placeholder="Текст, персонаж, Scene ID или Fragment ID" autocomplete="off" />
+        <div id="globalSearchResults" class="search-results"></div>
+      </div>
+    </form>
   </dialog>
 
-  <div id="toast" class="toast hidden"></div>
+  <dialog id="candidateDialog" class="modal modal-xl">
+    <form method="dialog" class="modal-card">
+      <header class="modal-head"><div><span class="kicker">GPT DIFF</span><h2>Проверка исправлений</h2></div><button value="cancel" class="icon-btn">×</button></header>
+      <div id="candidateDialogBody" class="modal-body"></div>
+      <footer id="candidateDialogFooter" class="modal-footer"></footer>
+    </form>
+  </dialog>
+
+  <dialog id="validationDialog" class="modal modal-wide">
+    <form method="dialog" class="modal-card">
+      <header class="modal-head"><div><span class="kicker">VALIDATION</span><h2>Проверка сценария</h2></div><button value="cancel" class="icon-btn">×</button></header>
+      <div id="validationDialogBody" class="modal-body"></div>
+      <footer class="modal-footer"><button value="default" class="btn primary">Готово</button></footer>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast hidden" role="status"></div>
 
   <script src="builtin-novel.js"></script>
+  <script src="storage.js"></script>
   <script src="parser.js"></script>
+  <script src="exporter.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

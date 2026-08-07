@@ -1,307 +1,55 @@
 (() => {
   'use strict';
+  const td=new TextDecoder('utf-8',{fatal:false});
+  const readU16=(v,o)=>v.getUint16(o,true), readU32=(v,o)=>v.getUint32(o,true);
+  const deepClone=o=>typeof structuredClone==='function'?structuredClone(o):JSON.parse(JSON.stringify(o));
+  const uid=(p='ID')=>`${p}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2,9)}`;
+  const slug=s=>String(s||'').normalize('NFKD').replace(/[^A-Za-z0-9А-Яа-яЁё_-]+/g,'_').replace(/^_+|_+$/g,'').slice(0,64)||'novel';
 
-  const te = new TextEncoder();
-  const td = new TextDecoder('utf-8', { fatal: false });
-
-  function readU16(v, o) { return v.getUint16(o, true); }
-  function readU32(v, o) { return v.getUint32(o, true); }
-
-  class MiniZip {
-    constructor(buffer) {
-      this.buffer = buffer instanceof ArrayBuffer ? buffer : buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength);
-      this.bytes = new Uint8Array(this.buffer);
-      this.view = new DataView(this.buffer);
-      this.entries = this._readDirectory();
-    }
-
-    _readDirectory() {
-      const v = this.view;
-      const b = this.bytes;
-      let eocd = -1;
-      const min = Math.max(0, b.length - 65557);
-      for (let i = b.length - 22; i >= min; i--) {
-        if (readU32(v, i) === 0x06054b50) { eocd = i; break; }
-      }
-      if (eocd < 0) throw new Error('ZIP: не найден центральный каталог');
-      const total = readU16(v, eocd + 10);
-      let ptr = readU32(v, eocd + 16);
-      const entries = [];
-      for (let n = 0; n < total; n++) {
-        if (readU32(v, ptr) !== 0x02014b50) throw new Error('ZIP: повреждён центральный каталог');
-        const flags = readU16(v, ptr + 8);
-        const method = readU16(v, ptr + 10);
-        const compressedSize = readU32(v, ptr + 20);
-        const uncompressedSize = readU32(v, ptr + 24);
-        const fileNameLength = readU16(v, ptr + 28);
-        const extraLength = readU16(v, ptr + 30);
-        const commentLength = readU16(v, ptr + 32);
-        const localOffset = readU32(v, ptr + 42);
-        const nameBytes = b.slice(ptr + 46, ptr + 46 + fileNameLength);
-        let name = td.decode(nameBytes);
-        if (!(flags & 0x0800)) {
-          // Even when legacy encoding is used, ASCII path pieces such as word/document.xml
-          // and .docx remain decodable. Replacement characters in display names are harmless.
-          name = td.decode(nameBytes);
-        }
-        entries.push({ name, method, compressedSize, uncompressedSize, localOffset });
-        ptr += 46 + fileNameLength + extraLength + commentLength;
-      }
-      return entries;
-    }
-
-    list() { return this.entries.slice(); }
-
-    async read(entryOrName) {
-      const entry = typeof entryOrName === 'string'
-        ? this.entries.find(e => e.name === entryOrName)
-        : entryOrName;
-      if (!entry) throw new Error(`ZIP: файл не найден: ${entryOrName}`);
-      const v = this.view;
-      const b = this.bytes;
-      const off = entry.localOffset;
-      if (readU32(v, off) !== 0x04034b50) throw new Error('ZIP: повреждён локальный заголовок');
-      const nameLen = readU16(v, off + 26);
-      const extraLen = readU16(v, off + 28);
-      const dataStart = off + 30 + nameLen + extraLen;
-      const compressed = b.slice(dataStart, dataStart + entry.compressedSize);
-      if (entry.method === 0) return compressed;
-      if (entry.method === 8) return await inflateRaw(compressed);
-      throw new Error(`ZIP: метод сжатия ${entry.method} пока не поддерживается`);
-    }
+  class MiniZip{
+    constructor(buffer){this.buffer=buffer instanceof ArrayBuffer?buffer:buffer.buffer.slice(buffer.byteOffset,buffer.byteOffset+buffer.byteLength);this.bytes=new Uint8Array(this.buffer);this.view=new DataView(this.buffer);this.entries=this._readDirectory();}
+    _readDirectory(){const v=this.view,b=this.bytes;let e=-1;for(let i=b.length-22;i>=Math.max(0,b.length-65557);i--){if(readU32(v,i)===0x06054b50){e=i;break;}}if(e<0)throw new Error('ZIP: не найден центральный каталог');const total=readU16(v,e+10);let ptr=readU32(v,e+16);const out=[];for(let n=0;n<total;n++){if(readU32(v,ptr)!==0x02014b50)throw new Error('ZIP: повреждён центральный каталог');const flags=readU16(v,ptr+8),method=readU16(v,ptr+10),compressedSize=readU32(v,ptr+20),uncompressedSize=readU32(v,ptr+24),fileNameLength=readU16(v,ptr+28),extraLength=readU16(v,ptr+30),commentLength=readU16(v,ptr+32),localOffset=readU32(v,ptr+42);const name=td.decode(b.slice(ptr+46,ptr+46+fileNameLength));out.push({name,flags,method,compressedSize,uncompressedSize,localOffset});ptr+=46+fileNameLength+extraLength+commentLength;}return out;}
+    list(){return this.entries.slice();}
+    async read(entryOrName){const e=typeof entryOrName==='string'?this.entries.find(x=>x.name===entryOrName):entryOrName;if(!e)throw new Error(`ZIP: файл не найден: ${entryOrName}`);const v=this.view,b=this.bytes,o=e.localOffset;if(readU32(v,o)!==0x04034b50)throw new Error('ZIP: повреждён локальный заголовок');const nl=readU16(v,o+26),xl=readU16(v,o+28),start=o+30+nl+xl,compressed=b.slice(start,start+e.compressedSize);if(e.method===0)return compressed;if(e.method===8)return inflateRaw(compressed);throw new Error(`ZIP: метод сжатия ${e.method} не поддерживается`);}
   }
+  async function inflateRaw(bytes){if(typeof DecompressionStream==='undefined')throw new Error('Браузер не умеет распаковывать DOCX. Используйте актуальный Chrome/Edge/Safari/Firefox.');let ds;try{ds=new DecompressionStream('deflate-raw');}catch(_){ds=new DecompressionStream('deflate');}return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer());}
+  const localName=el=>(el&&(el.localName||el.nodeName.split(':').pop()))||'';
+  function attr(el,name){if(!el)return null;for(const a of Array.from(el.attributes||[]))if(a.localName===name||a.name===name||a.name.endsWith(':'+name))return a.value;return null;}
+  const descendants=(el,name)=>Array.from(el.getElementsByTagNameNS('*',name));
+  function parseXml(bytes,label){const doc=new DOMParser().parseFromString(td.decode(bytes),'application/xml');if(doc.querySelector('parsererror'))throw new Error(`DOCX: не удалось разобрать ${label}`);return doc;}
+  function paragraphText(p){let out='';function walk(n){if(n.nodeType!==1)return;const ln=localName(n);if(ln==='t'){out+=n.textContent||'';return;}if(ln==='tab'){out+='\t';return;}if(ln==='br'||ln==='cr'){out+='\n';return;}for(const c of Array.from(n.childNodes))walk(c);}walk(p);return out.replace(/\u00a0/g,' ').trim();}
+  function paragraphBookmark(p,prefix){for(const b of descendants(p,'bookmarkStart')){const n=attr(b,'name')||'';if(n.startsWith(prefix))return n.slice(prefix.length);}return null;}
 
-  async function inflateRaw(bytes) {
-    if (typeof DecompressionStream === 'undefined') {
-      throw new Error('Браузер не поддерживает распаковку DOCX. Откройте сервис в актуальном Safari/Chrome/Edge.');
-    }
-    let stream;
-    try { stream = new DecompressionStream('deflate-raw'); }
-    catch (_) { stream = new DecompressionStream('deflate'); }
-    const input = new Blob([bytes]).stream().pipeThrough(stream);
-    return new Uint8Array(await new Response(input).arrayBuffer());
+  async function parseDocxBytes(bytes,sourceName){const zip=new MiniZip(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));const de=zip.list().find(e=>e.name==='word/document.xml');if(!de)throw new Error(`${sourceName}: отсутствует word/document.xml`);const se=zip.list().find(e=>e.name==='word/styles.xml');const styles=new Map();if(se){const sd=parseXml(await zip.read(se),'styles.xml');for(const st of Array.from(sd.getElementsByTagNameNS('*','style'))){const id=attr(st,'styleId'),nameEl=descendants(st,'name')[0];if(id&&nameEl)styles.set(id,attr(nameEl,'val')||id);}}
+    const doc=parseXml(await zip.read(de),'document.xml');const paragraphs=[];let excluded=0;for(const p of Array.from(doc.getElementsByTagNameNS('*','p'))){const text=paragraphText(p);if(!text)continue;const ps=descendants(p,'pStyle')[0],styleId=ps?attr(ps,'val'):'',style=styles.get(styleId)||styleId||'Normal';if(style.startsWith('НЕ ЭКСПОРТИРОВАТЬ')){excluded++;continue;}paragraphs.push({style,text,source:sourceName,fragmentIdHint:paragraphBookmark(p,'HL_FR_'),sceneIdHint:paragraphBookmark(p,'HL_SC_')});}return{paragraphs,excluded};
   }
+  function parseTech(text){const m=text.match(/^([A-ZА-ЯЁ_]+):\s*(.*)$/u);return m?{type:'tech',command:m[1].trim(),value:m[2].trim(),text}:{type:'tech',command:'RAW',value:text,text};}
+  function splitIdLabel(value){const pos=value.indexOf('—');if(pos>=0)return[value.slice(0,pos).trim(),value.slice(pos+1).trim()];return[value.trim(),value.trim()];}
 
-  function localName(el) { return (el && (el.localName || el.nodeName.split(':').pop())) || ''; }
-  function attr(el, name) {
-    if (!el) return null;
-    for (const a of Array.from(el.attributes || [])) {
-      if (a.localName === name || a.name === name || a.name.endsWith(':' + name)) return a.value;
-    }
-    return null;
-  }
-  function descendants(el, name) {
-    return Array.from(el.getElementsByTagNameNS('*', name));
-  }
-  function paragraphText(p) {
-    let out = '';
-    function walk(node) {
-      if (node.nodeType !== 1) return;
-      const ln = localName(node);
-      if (ln === 't') { out += node.textContent || ''; return; }
-      if (ln === 'tab') { out += '\t'; return; }
-      if (ln === 'br' || ln === 'cr') { out += '\n'; return; }
-      for (const ch of Array.from(node.childNodes)) walk(ch);
-    }
-    walk(p);
-    return out.replace(/\u00a0/g, ' ').trim();
-  }
+  function compileParagraphs(paragraphs,titleHint,report){const scenes=[];let current=null;for(const p of paragraphs){const style=p.style||'',text=p.text.trim();if(!text)continue;const m=text.match(/^\[([^\]]+)\]\s*(.*)$/);if(m&&(style==='Heading 1'||/^\[[A-Z0-9_]+\]/i.test(text))){current={id:m[1].trim(),title:m[2].trim()||m[1].trim(),source:p.source,raw:[]};scenes.push(current);continue;}if(!current)continue;let item;if(style==='Scenario Dialogue'){const dm=text.match(/^(.+?)(?:\t|\s{2,})(.+)$/s);item=dm?{type:'dialogue',speaker:dm[1].trim(),text:dm[2].trim(),style}:{type:'dialogue',speaker:'',text,style};}else if(style==='Scenario Thought')item={type:'thought',text,style};else if(style==='Scenario Narration')item={type:'narration',text,style};else if(style==='Scenario Choice')item={...parseTech(text),style};else if(style==='Scenario Tech')item={...parseTech(text),style};else item={type:'narration',text,style};if(p.fragmentIdHint)item.fragmentId=p.fragmentIdHint;current.raw.push(item);}
+    let choices=0;for(const scene of scenes){const raw=scene.raw;delete scene.raw;const steps=[];let i=0;while(i<raw.length){const item=raw[i];if(item.type==='tech'&&item.command==='CHOICE'){choices++;const [choiceId,prompt]=splitIdLabel(item.value);const markers=[];for(let j=i+1;j<raw.length;j++)if(raw[j].type==='tech'&&raw[j].command==='OPTION')markers.push(j);const options=markers.map((start,idx)=>{const end=idx+1<markers.length?markers[idx+1]:raw.length,[id,labelRaw]=splitIdLabel(raw[start].value),branch=raw.slice(start+1,end);let goto=null;for(const b of branch)if(b.type==='tech'&&b.command==='GOTO')goto=b.value;return{id,label:labelRaw.replace(/^«|»$/g,''),steps:branch,goto};});const fallback=[...options].reverse().find(o=>o.goto)?.goto||null;for(const o of options)if(!o.goto&&fallback)o.fallbackGoto=fallback;steps.push({type:'choice',id:choiceId,prompt,options,fragmentId:item.fragmentId});i=raw.length;}else{steps.push(item);i++;}}scene.steps=steps;}
+    const novel={schemaVersion:2,id:`novel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,7)}`,title:cleanTitle(titleHint)||scenes[0]?.title||'Импортированная новелла',subtitle:'Импортировано в HEARTLINE Novel Editor',startScene:scenes[0]?.id||'',sourceFiles:[...new Set(paragraphs.map(p=>p.source))],excludedParagraphs:report.excluded,scenes};ensureStableIds(novel);report.scenes=scenes.length;report.choices=choices;report.fragments=flattenFragments(novel).length;return novel;}
+  const cleanTitle=n=>String(n||'').replace(/\.(zip|docx|json)$/i,'').replace(/[_-]+/g,' ').replace(/\s+/g,' ').trim();
 
-  function parseXml(bytes, label) {
-    const xml = td.decode(bytes);
-    const doc = new DOMParser().parseFromString(xml, 'application/xml');
-    const pe = doc.querySelector('parsererror');
-    if (pe) throw new Error(`DOCX: не удалось разобрать ${label}`);
-    return doc;
-  }
+  function chapterForScene(scene,index){if(scene.chapterId)return{chapterId:scene.chapterId,chapterTitle:scene.chapterTitle||scene.chapterId};const id=String(scene.id||'');let m=id.match(/^CH(\d+)/i);if(m)return{chapterId:`CH${m[1]}`,chapterTitle:`Глава ${Number(m[1])}`};if(/^OB_/i.test(id))return{chapterId:'OB',chapterTitle:'Пролог'};if(/^CLIM_/i.test(id))return{chapterId:'CLIM',chapterTitle:'Кульминация'};if(/^AM_/i.test(id))return{chapterId:'AM',chapterTitle:'Утро'};if(/^EP_/i.test(id))return{chapterId:'EP',chapterTitle:'Эпилог'};return{chapterId:'OTHER',chapterTitle:'Другие сцены'};}
+  function ensureStableIds(novel){if(!novel.id)novel.id=`novel-${uid('n').toLowerCase()}`;novel.schemaVersion=2;for(let si=0;si<(novel.scenes||[]).length;si++){const s=novel.scenes[si];if(!s.id)s.id=`SC_${String(si+1).padStart(3,'0')}`;const ch=chapterForScene(s,si);s.chapterId=ch.chapterId;s.chapterTitle=s.chapterTitle||ch.chapterTitle;s.order=si;assignSteps(s.steps||[],s.id,[]);}return novel;}
+  function assignSteps(steps,sceneId,path){for(let i=0;i<steps.length;i++){const st=steps[i],base=[...path,i];if(!st.fragmentId)st.fragmentId=`FR_${sceneId}_${base.map(x=>String(x+1).padStart(3,'0')).join('_')}`;st.order=i;if(st.type==='choice'){if(!st.id)st.id=`CHOICE_${sceneId}_${i+1}`;for(let oi=0;oi<(st.options||[]).length;oi++){const o=st.options[oi];if(!o.id)o.id=`OPT_${oi+1}`;assignSteps(o.steps||[],sceneId,[...base,oi]);}}}}
+  function normalizeNovel(input){const n=deepClone(input);if(n.novel)n.scenes=n.novel.scenes;if(!Array.isArray(n.scenes)||!n.scenes.length)throw new Error('Файл не похож на HEARTLINE-новеллу: нет scenes');if(!n.title)n.title='Импортированная новелла';if(!n.startScene)n.startScene=n.scenes[0].id;return ensureStableIds(n);}
+  function flattenFragments(novel,{includeTech=false}={}){const out=[];for(const scene of novel.scenes||[])walk(scene.steps||[],scene,[]);return out;function walk(steps,scene,path){for(let i=0;i<steps.length;i++){const st=steps[i],p=[...path,i];if(includeTech||st.type!=='tech')out.push({fragmentId:st.fragmentId,sceneId:scene.id,sceneTitle:scene.title,chapterId:scene.chapterId,chapterTitle:scene.chapterTitle,type:st.type,speaker:st.speaker||'',text:st.type==='choice'?(st.prompt||'Выбор'):(st.text||''),step:st,path:p});if(st.type==='choice')for(let oi=0;oi<(st.options||[]).length;oi++)walk(st.options[oi].steps||[],scene,[...p,oi]);}}}
+  function getFragmentRef(novel,fragmentId){let found=null;for(const scene of novel.scenes||[]){walk(scene.steps||[],scene,[]);if(found)break;}return found;function walk(steps,scene,path){for(let i=0;i<steps.length&&!found;i++){const st=steps[i],p=[...path,i];if(st.fragmentId===fragmentId){found={scene,step:st,path:p};return;}if(st.type==='choice')for(let oi=0;oi<(st.options||[]).length&&!found;oi++)walk(st.options[oi].steps||[],scene,[...p,oi]);}}}
+  function getChapterGroups(novel){const map=new Map();for(const s of novel.scenes||[]){if(!map.has(s.chapterId))map.set(s.chapterId,{chapterId:s.chapterId,title:s.chapterTitle||s.chapterId,scenes:[]});map.get(s.chapterId).scenes.push(s);}return[...map.values()];}
+  function allGotos(steps,out=[]){for(const st of steps||[]){if(st.type==='tech'&&st.command==='GOTO')out.push(st.value);if(st.type==='choice')for(const o of st.options||[]){if(o.goto)out.push(o.goto);if(o.fallbackGoto)out.push(o.fallbackGoto);allGotos(o.steps||[],out);}}return out;}
+  function allSetsIfs(steps,sets,ifs){for(const st of steps||[]){if(st.type==='tech'&&st.command==='SET'){const m=String(st.value||'').match(/^([A-Z0-9_]+)/i);if(m)sets.add(m[1]);}if(st.type==='tech'&&st.command==='IF'){const m=String(st.value||'').match(/^([A-Z0-9_]+)/i);if(m)ifs.add(m[1]);}if(st.type==='choice')for(const o of st.options||[])allSetsIfs(o.steps||[],sets,ifs);}}
+  function dynamicTargets(raw,ids){const t=String(raw||'').trim().replace(/[.;]+$/,'');if(ids.has(t))return[t];if(/соответствующая маршрутная сцена/i.test(t))return['CH03_SC03_EQUAL','CH03_SC03_FIRE','CH03_SC03_MASK'].filter(x=>ids.has(x));if(/согласно ROUTE_ID/i.test(t))return['CH06_SC04_DIRECT','CH06_SC05_EQUAL','CH06_SC05_FIRE','CH06_SC05_MASK'].filter(x=>ids.has(x));return[];}
+  function validateNovel(input){let novel;try{novel=normalizeNovel(input);}catch(e){return{ok:false,errors:[e.message],warnings:[],stats:{scenes:0,fragments:0,choices:0,gotos:0,unreachable:0}};}const errors=[],warnings=[],sceneIds=new Set(),fragmentIds=new Set(),sets=new Set(['HONESTY','ATTRACTION','TRUST','PROFESSIONAL_COST']),ifs=new Set();let choices=0,gotos=0;for(const s of novel.scenes){if(sceneIds.has(s.id))errors.push(`Дублируется Scene ID: ${s.id}`);sceneIds.add(s.id);allSetsIfs(s.steps,sets,ifs);for(const f of flattenScene(s)){if(fragmentIds.has(f.fragmentId))errors.push(`Дублируется Fragment ID: ${f.fragmentId}`);fragmentIds.add(f.fragmentId);if(f.type==='choice'){choices++;const opts=new Set();for(const o of f.step.options||[]){if(opts.has(o.id))errors.push(`Дублируется Option ID ${o.id} в ${s.id}`);opts.add(o.id);}}}gotos+=allGotos(s.steps,[]).length;}if(!sceneIds.has(novel.startScene))errors.push(`startScene не существует: ${novel.startScene}`);
+    for(const s of novel.scenes)for(const raw of allGotos(s.steps,[])){const targets=dynamicTargets(raw,sceneIds);if(!targets.length&&!/соответствующая маршрутная сцена|согласно ROUTE_ID/i.test(String(raw||'')))errors.push(`Не найден GOTO target «${raw}» в ${s.id}`);}
+    for(const f of ifs)if(!sets.has(f))warnings.push(`IF использует флаг ${f}, который нигде не задаётся SET.`);
+    const graph=new Map(novel.scenes.map(s=>[s.id,new Set()]));for(let i=0;i<novel.scenes.length;i++){const s=novel.scenes[i];for(const raw of allGotos(s.steps,[]))for(const t of dynamicTargets(raw,sceneIds))graph.get(s.id).add(t);if(graph.get(s.id).size===0&&novel.scenes[i+1])graph.get(s.id).add(novel.scenes[i+1].id);}const seen=new Set(),q=[novel.startScene];while(q.length){const x=q.shift();if(!x||seen.has(x)||!graph.has(x))continue;seen.add(x);for(const y of graph.get(x))q.push(y);}const unreachable=novel.scenes.filter(s=>!seen.has(s.id));for(const s of unreachable)warnings.push(`Недостижимая сцена: ${s.id} · ${s.title}`);
+    return{ok:errors.length===0,errors,warnings,stats:{scenes:novel.scenes.length,fragments:flattenFragments(novel).length,choices,gotos,unreachable:unreachable.length},novel};
+    function flattenScene(scene){const arr=[];(function w(steps){for(const st of steps||[]){if(st.type!=='tech')arr.push({fragmentId:st.fragmentId,type:st.type,step:st});if(st.type==='choice')for(const o of st.options||[])w(o.steps);}})(scene.steps);return arr;}}
 
-  async function parseDocxBytes(bytes, sourceName) {
-    const zip = new MiniZip(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-    const styleEntry = zip.list().find(e => e.name === 'word/styles.xml');
-    const docEntry = zip.list().find(e => e.name === 'word/document.xml');
-    if (!docEntry) throw new Error(`${sourceName}: внутри DOCX нет word/document.xml`);
+  async function importFiles(fileList){const files=Array.from(fileList||[]);if(!files.length)throw new Error('Файлы не выбраны');const report={files:[],excluded:0,paragraphs:0,scenes:0,choices:0,fragments:0,format:'DOCX'};if(files.length===1&&files[0].name.toLowerCase().endsWith('.json')){const novel=normalizeNovel(JSON.parse(await files[0].text()));const vr=validateNovel(novel);Object.assign(report,vr.stats,{files:[files[0].name],format:'JSON'});return{novel:vr.novel,report,validation:vr};}
+    const paragraphs=[];let titleHint=files[0].name;for(const file of files){const lower=file.name.toLowerCase(),bytes=new Uint8Array(await file.arrayBuffer());if(lower.endsWith('.docx')){const r=await parseDocxBytes(bytes,file.name);paragraphs.push(...r.paragraphs);report.excluded+=r.excluded;report.files.push(file.name);}else if(lower.endsWith('.zip')){const outer=new MiniZip(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));const jsonEntry=outer.list().find(e=>/(^|\/)novel\.json$/i.test(e.name));const docs=outer.list().filter(e=>e.name.toLowerCase().endsWith('.docx'));if(!docs.length&&jsonEntry){const novel=normalizeNovel(JSON.parse(td.decode(await outer.read(jsonEntry))));const vr=validateNovel(novel);Object.assign(report,vr.stats,{files:[jsonEntry.name],format:'JSON ZIP'});return{novel:vr.novel,report,validation:vr};}if(!docs.length)throw new Error(`${file.name}: DOCX/novel.json внутри не найдены`);for(const e of docs){const r=await parseDocxBytes(await outer.read(e),e.name);paragraphs.push(...r.paragraphs);report.excluded+=r.excluded;report.files.push(e.name);}}else throw new Error(`Неподдерживаемый файл: ${file.name}`);}report.paragraphs=paragraphs.length;const novel=compileParagraphs(paragraphs,titleHint,report),validation=validateNovel(novel);return{novel:validation.novel,report,validation};}
 
-    const styles = new Map();
-    if (styleEntry) {
-      const styleDoc = parseXml(await zip.read(styleEntry), 'styles.xml');
-      for (const st of Array.from(styleDoc.getElementsByTagNameNS('*', 'style'))) {
-        const id = attr(st, 'styleId');
-        const nameEl = descendants(st, 'name')[0];
-        if (id && nameEl) styles.set(id, attr(nameEl, 'val') || id);
-      }
-    }
-
-    const doc = parseXml(await zip.read(docEntry), 'document.xml');
-    const paragraphs = [];
-    let excluded = 0;
-    for (const p of Array.from(doc.getElementsByTagNameNS('*', 'p'))) {
-      const text = paragraphText(p);
-      if (!text) continue;
-      const pStyle = descendants(p, 'pStyle')[0];
-      const styleId = pStyle ? attr(pStyle, 'val') : '';
-      const styleName = styles.get(styleId) || styleId || 'Normal';
-      if (styleName.startsWith('НЕ ЭКСПОРТИРОВАТЬ')) {
-        excluded++;
-        continue;
-      }
-      paragraphs.push({ style: styleName, text, source: sourceName });
-    }
-    return { paragraphs, excluded };
-  }
-
-  function parseTech(text) {
-    const m = text.match(/^([A-ZА-ЯЁ_]+):\s*(.*)$/u);
-    return m
-      ? { type: 'tech', command: m[1].trim(), value: m[2].trim(), text }
-      : { type: 'tech', command: 'RAW', value: text, text };
-  }
-
-  function splitIdLabel(value) {
-    const pos = value.indexOf('—');
-    if (pos >= 0) return [value.slice(0, pos).trim(), value.slice(pos + 1).trim()];
-    return [value.trim(), value.trim()];
-  }
-
-  function compileParagraphs(paragraphs, titleHint, report) {
-    const scenes = [];
-    let current = null;
-    for (const p of paragraphs) {
-      const style = p.style || '';
-      const text = p.text.trim();
-      if (!text) continue;
-      if (style === 'Heading 1' || /^\[[A-Z0-9_]+\]\s*/.test(text)) {
-        const m = text.match(/^\[([^\]]+)\]\s*(.*)$/);
-        if (m) {
-          current = { id: m[1].trim(), title: m[2].trim() || m[1].trim(), source: p.source, raw: [] };
-          scenes.push(current);
-          continue;
-        }
-      }
-      if (!current) continue;
-      if (style === 'Scenario Dialogue') {
-        const m = text.match(/^(.+?)\s{2,}(.+)$/s);
-        current.raw.push(m
-          ? { type: 'dialogue', speaker: m[1].trim(), text: m[2].trim(), style }
-          : { type: 'dialogue', speaker: '', text, style });
-      } else if (style === 'Scenario Thought') {
-        current.raw.push({ type: 'thought', text, style });
-      } else if (style === 'Scenario Narration') {
-        current.raw.push({ type: 'narration', text, style });
-      } else if (style === 'Scenario Tech') {
-        current.raw.push({ ...parseTech(text), style });
-      } else {
-        current.raw.push({ type: 'narration', text, style });
-      }
-    }
-
-    let choiceCount = 0;
-    for (const scene of scenes) {
-      const raw = scene.raw;
-      delete scene.raw;
-      const steps = [];
-      let i = 0;
-      while (i < raw.length) {
-        const item = raw[i];
-        if (item.type === 'tech' && item.command === 'CHOICE') {
-          choiceCount++;
-          const [choiceId, prompt] = splitIdLabel(item.value);
-          const markers = [];
-          for (let j = i + 1; j < raw.length; j++) {
-            if (raw[j].type === 'tech' && raw[j].command === 'OPTION') markers.push(j);
-          }
-          const options = markers.map((start, idx) => {
-            const end = idx + 1 < markers.length ? markers[idx + 1] : raw.length;
-            const [id, labelRaw] = splitIdLabel(raw[start].value);
-            const label = labelRaw.replace(/^«|»$/g, '');
-            const branch = raw.slice(start + 1, end);
-            let goto = null;
-            for (const b of branch) if (b.type === 'tech' && b.command === 'GOTO') goto = b.value;
-            return { id, label, steps: branch, goto };
-          });
-          const fallback = [...options].reverse().find(o => o.goto)?.goto || null;
-          for (const o of options) if (!o.goto && fallback) o.fallbackGoto = fallback;
-          steps.push({ type: 'choice', id: choiceId, prompt, options });
-          // In the HEARTLINE format every choice owns the rest of the scene; each branch
-          // either has its own GOTO or inherits the last branch's terminal GOTO.
-          i = raw.length;
-        } else {
-          steps.push(item);
-          i++;
-        }
-      }
-      scene.steps = steps;
-    }
-
-    const safeTitle = cleanTitleHint(titleHint) || scenes[0]?.title || 'Импортированная новелла';
-    const id = `novel-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-    report.scenes = scenes.length;
-    report.choices = choiceCount;
-    return {
-      schemaVersion: 1,
-      id,
-      title: safeTitle,
-      subtitle: 'Импортировано в HEARTLINE Novel Player',
-      startScene: scenes[0]?.id || '',
-      sourceFiles: [...new Set(paragraphs.map(p => p.source))],
-      excludedParagraphs: report.excluded,
-      scenes
-    };
-  }
-
-  function cleanTitleHint(name) {
-    return String(name || '')
-      .replace(/\.(zip|docx|json)$/i, '')
-      .replace(/[_-]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  async function importFiles(fileList) {
-    const files = Array.from(fileList || []);
-    if (!files.length) throw new Error('Файлы не выбраны');
-    const report = { files: [], excluded: 0, paragraphs: 0, scenes: 0, choices: 0 };
-    const paragraphs = [];
-    let titleHint = files.length === 1 ? files[0].name : files[0].name;
-
-    for (const file of files) {
-      const lower = file.name.toLowerCase();
-      const bytes = new Uint8Array(await file.arrayBuffer());
-      if (lower.endsWith('.docx')) {
-        const r = await parseDocxBytes(bytes, file.name);
-        paragraphs.push(...r.paragraphs);
-        report.excluded += r.excluded;
-        report.files.push(file.name);
-      } else if (lower.endsWith('.zip')) {
-        const outer = new MiniZip(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength));
-        const entries = outer.list().filter(e => e.name.toLowerCase().endsWith('.docx'));
-        if (!entries.length) throw new Error(`${file.name}: DOCX-файлы внутри архива не найдены`);
-        let n = 0;
-        for (const entry of entries) {
-          n++;
-          const inner = await outer.read(entry);
-          const source = entry.name || `${file.name} / ${n}.docx`;
-          const r = await parseDocxBytes(inner, source);
-          paragraphs.push(...r.paragraphs);
-          report.excluded += r.excluded;
-          report.files.push(source);
-        }
-      } else {
-        throw new Error(`Неподдерживаемый файл: ${file.name}`);
-      }
-    }
-    report.paragraphs = paragraphs.length;
-    const novel = compileParagraphs(paragraphs, titleHint, report);
-    if (!novel.scenes.length) throw new Error('После фильтрации не найдено ни одной сцены вида [SCENE_ID] Название');
-    return { novel, report };
-  }
-
-  function validateNovel(novel) {
-    if (!novel || !Array.isArray(novel.scenes) || !novel.scenes.length) throw new Error('JSON не похож на HEARTLINE-новеллу');
-    if (!novel.id) novel.id = `novel-${Date.now().toString(36)}`;
-    if (!novel.title) novel.title = 'Импортированная новелла';
-    if (!novel.startScene) novel.startScene = novel.scenes[0].id;
-    return novel;
-  }
-
-  window.HEARTLINEParser = { importFiles, validateNovel, MiniZip };
+  window.HEARTLINEParser={MiniZip,importFiles,parseDocxBytes,normalizeNovel,ensureStableIds,validateNovel,flattenFragments,getFragmentRef,getChapterGroups,deepClone,uid,slug};
 })();
