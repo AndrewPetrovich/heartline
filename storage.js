@@ -6,10 +6,13 @@
   let dbPromise = null;
 
   function open() {
-    if (!('indexedDB' in window)) return Promise.resolve(null);
+    if (!('indexedDB' in window) || !window.indexedDB) return Promise.resolve(null);
     if (dbPromise) return dbPromise;
     dbPromise = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      let settled=false, req=null;
+      const done=(fn,value)=>{if(settled)return;settled=true;clearTimeout(timer);fn(value)};
+      const timer=setTimeout(()=>done(reject,new Error('Локальная база IndexedDB не ответила за 8 секунд. Закройте другие вкладки HEARTLINE и обновите страницу.')),8000);
+      try{req=indexedDB.open(DB_NAME, DB_VERSION)}catch(e){done(reject,e);return}
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains('novels')) db.createObjectStore('novels', { keyPath:'novelId' });
@@ -19,8 +22,9 @@
         if (!db.objectStoreNames.contains('gptCycles')) db.createObjectStore('gptCycles', { keyPath:'cycleId' });
         if (!db.objectStoreNames.contains('settings')) db.createObjectStore('settings', { keyPath:'key' });
       };
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error || new Error('IndexedDB недоступен'));
+      req.onsuccess = () => done(resolve,req.result);
+      req.onerror = () => done(reject,req.error || new Error('IndexedDB недоступен'));
+      req.onblocked = () => done(reject,new Error('IndexedDB заблокирована другой вкладкой HEARTLINE. Закройте другие вкладки приложения и обновите страницу.'));
     });
     return dbPromise;
   }
