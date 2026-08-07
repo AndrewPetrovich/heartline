@@ -55,8 +55,15 @@
     els.novelGrid.querySelectorAll('[data-delete]').forEach(btn => btn.addEventListener('click', () => deleteNovel(btn.dataset.delete)));
   }
 
-  function renderNovelCard(novel) {
+  function compatibleProgress(novel) {
     const saved = loadProgress(novel.id);
+    if (!saved) return null;
+    if (novel.contentVersion && saved.contentVersion !== novel.contentVersion) return null;
+    return saved;
+  }
+
+  function renderNovelCard(novel) {
+    const saved = compatibleProgress(novel);
     const progress = saved ? Math.round(((novel.scenes.findIndex(s => s.id === saved.sceneId) + 1) / novel.scenes.length) * 100) : 0;
     const imported = novel.id !== BUILTIN.id;
     return `<article class="novel-card" style="--card-hue:${hashHue(novel.title)}">
@@ -92,6 +99,7 @@
     return {
       schemaVersion: 1,
       novelId: novel.id,
+      contentVersion: novel.contentVersion || null,
       sceneId: novel.startScene || novel.scenes[0].id,
       ip: 0,
       branch: null,
@@ -108,7 +116,7 @@
   function openNovel(id, forceNew = false) {
     currentNovel = novels.find(n => n.id === id);
     if (!currentNovel) return;
-    const saved = !forceNew ? loadProgress(id) : null;
+    const saved = !forceNew ? compatibleProgress(currentNovel) : null;
     state = saved && !saved.ended ? saved : createInitialState(currentNovel);
     if (!state.vars) state.vars = {};
     if (!state.history) state.history = [];
@@ -198,7 +206,8 @@
         if (step.command === 'IF') {
           const ok = evalCondition(step.value);
           if (!ok) {
-            const scope = computeIfScope(seq.steps, idx);
+            const explicitScope = Number.isInteger(step.scope) && step.scope >= 0 ? step.scope : null;
+            const scope = explicitScope !== null ? explicitScope : computeIfScope(seq.steps, idx);
             setSequenceIp(seq.kind, Math.min(seq.steps.length, idx + 1 + scope));
           }
           continue;
