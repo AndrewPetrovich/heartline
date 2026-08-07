@@ -11,7 +11,7 @@
   <title>HEARTLINE Novel Editor</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20260807-250" />
+  <link rel="stylesheet" href="styles.css?v=20260807-270" />
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -116,6 +116,26 @@
     </form>
   </dialog>
 
+
+  <dialog id="branchGraphDialog" class="branch-graph-dialog">
+    <div class="branch-graph-shell">
+      <header class="branch-graph-head">
+        <div><span class="kicker">STORY GRAPH</span><h2>Карта ветвлений</h2><p id="graphStats">Структура новеллы</p></div>
+        <div class="branch-graph-head-actions"><button id="graphCurrent" class="btn secondary small" type="button">Текущая сцена</button><button id="closeBranchGraphBtn" class="icon-btn" type="button" aria-label="Закрыть">×</button></div>
+      </header>
+      <div class="branch-graph-toolbar">
+        <input id="graphSearch" class="search-input" placeholder="Сцена, Choice ID или название" />
+        <select id="graphFilter" class="select"><option value="all">Вся новелла</option><option value="current">Текущий маршрут</option><option value="unread">Непройденные</option><option value="reviews">С замечаниями</option><option value="endings">Концовки</option></select>
+        <div class="graph-zoom-controls"><button id="graphZoomOut" class="btn secondary small" type="button">−</button><span id="graphZoomLabel">100%</span><button id="graphZoomIn" class="btn secondary small" type="button">+</button><button id="graphFit" class="btn secondary small" type="button">Вместить</button></div>
+      </div>
+      <div class="branch-graph-body">
+        <div id="graphViewport" class="graph-viewport"><svg id="branchGraphSvg" class="branch-graph-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+        <aside class="graph-inspector"><div class="graph-inspector-head"><strong>Узел</strong><span>Кликните по сцене или выбору</span></div><div id="graphInspectorBody" class="graph-inspector-body"></div></aside>
+      </div>
+      <footer class="branch-graph-legend"><span><i class="legend-dot start"></i>Начало</span><span><i class="legend-dot choice"></i>Выбор</span><span><i class="legend-dot current"></i>Текущая</span><span><i class="legend-dot visited"></i>Пройдено</span><span><i class="legend-dot review"></i>Есть замечания</span><span><i class="legend-dot end"></i>Концовка</span><span class="muted">Двойной клик по ноде открывает сцену</span></footer>
+    </div>
+  </dialog>
+
   <dialog id="validationDialog" class="modal modal-wide">
     <form method="dialog" class="modal-card">
       <header class="modal-head"><div><span class="kicker">VALIDATION</span><h2>Проверка сценария</h2></div><button value="cancel" class="icon-btn">×</button></header>
@@ -126,10 +146,10 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
-  <script src="builtin-novel.js?v=20260807-250"></script>
-  <script src="storage.js?v=20260807-250"></script>
-  <script src="parser.js?v=20260807-250"></script>
-  <script src="exporter.js?v=20260807-250"></script>
-  <script src="app.js?v=20260807-250"></script>
+  <script src="builtin-novel.js?v=20260807-270"></script>
+  <script src="storage.js?v=20260807-270"></script>
+  <script src="parser.js?v=20260807-270"></script>
+  <script src="exporter.js?v=20260807-270"></script>
+  <script src="app.js?v=20260807-270"></script>
 </body>
 </html>
