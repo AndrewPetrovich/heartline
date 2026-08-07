@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#120b10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="HEARTLINE" />
+  <title>HEARTLINE Reader</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <section id="libraryScreen" class="screen library-screen">
+      <header class="library-header">
+        <div>
+          <div class="eyebrow">HEARTLINE</div>
+          <h1>Novel Player</h1>
+          <p>Мобильный проигрыватель интерактивных мини-новелл.</p>
+        </div>
+        <button id="installBtn" class="icon-btn hidden" aria-label="Установить приложение">＋</button>
+      </header>
+
+      <div class="library-actions">
+        <button id="importBtn" class="primary-btn">Импортировать новеллу</button>
+        <button id="importJsonBtn" class="secondary-btn">Импорт JSON</button>
+      </div>
+
+      <div class="import-rule">
+        <strong>Правило импорта DOCX:</strong> абзацы со стилями, начинающимися с
+        <code>НЕ ЭКСПОРТИРОВАТЬ</code>, не попадают в игру.
+      </div>
+
+      <main>
+        <div class="section-row">
+          <h2>Библиотека</h2>
+          <span id="libraryCount" class="muted"></span>
+        </div>
+        <div id="novelGrid" class="novel-grid"></div>
+      </main>
+      <footer class="library-footer">Работает локально в браузере. Сценарии не отправляются на сервер.</footer>
+    </section>
+
+    <section id="playerScreen" class="screen player-screen hidden">
+      <div id="sceneBackdrop" class="scene-backdrop">
+        <div class="grain"></div>
+        <div class="vignette"></div>
+        <header class="player-topbar">
+          <button id="backToLibraryBtn" class="round-btn" aria-label="В библиотеку">‹</button>
+          <div class="scene-meta">
+            <div id="novelTitleMini" class="scene-novel-title"></div>
+            <div id="sceneTitleMini" class="scene-title-mini"></div>
+          </div>
+          <button id="debugBtn" class="round-btn" aria-label="Debug">⌘</button>
+        </header>
+
+        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+
+        <div class="stage" id="stage">
+          <div id="sceneLabel" class="scene-label"></div>
+          <div id="visualCue" class="visual-cue"></div>
+        </div>
+
+        <div id="choicePanel" class="choice-panel hidden" aria-live="polite">
+          <div id="choicePrompt" class="choice-prompt"></div>
+          <div id="choiceOptions" class="choice-options"></div>
+        </div>
+
+        <button id="dialoguePanel" class="dialogue-panel" aria-label="Следующая реплика">
+          <div class="dialogue-head">
+            <span id="speakerName" class="speaker-name"></span>
+            <span id="thoughtBadge" class="thought-badge hidden">мысль</span>
+          </div>
+          <div id="dialogueText" class="dialogue-text"></div>
+          <div class="continue-row">
+            <span id="tapHint">нажмите, чтобы продолжить</span>
+            <span class="continue-arrow">⌄</span>
+          </div>
+        </button>
+
+        <nav class="player-toolbar">
+          <button id="historyBtn" class="toolbar-btn">История</button>
+          <button id="restartBtn" class="toolbar-btn">Сначала</button>
+          <button id="saveBtn" class="toolbar-btn">Сохранено ✓</button>
+        </nav>
+      </div>
+    </section>
+  </div>
+
+  <input id="fileInput" type="file" accept=".docx,.zip" multiple hidden />
+  <input id="jsonInput" type="file" accept=".json" hidden />
+
+  <dialog id="historyDialog" class="sheet-dialog">
+    <div class="sheet-head">
+      <div><div class="eyebrow">ПРОХОЖДЕНИЕ</div><h3>История</h3></div>
+      <button class="close-btn" data-close="historyDialog">×</button>
+    </div>
+    <div id="historyList" class="history-list"></div>
+  </dialog>
+
+  <dialog id="debugDialog" class="sheet-dialog debug-dialog">
+    <div class="sheet-head">
+      <div><div class="eyebrow">DEVELOPER MODE</div><h3>Debug</h3></div>
+      <button class="close-btn" data-close="debugDialog">×</button>
+    </div>
+    <div class="debug-actions">
+      <button id="jumpSceneBtn" class="secondary-btn">Перейти к сцене</button>
+      <button id="exportStateBtn" class="secondary-btn">Экспорт состояния</button>
+      <button id="exportNovelBtn" class="secondary-btn">Экспорт JSON новеллы</button>
+    </div>
+    <div class="debug-section"><h4>Текущая сцена</h4><pre id="debugScene"></pre></div>
+    <div class="debug-section"><h4>Переменные и флаги</h4><pre id="debugVars"></pre></div>
+    <div class="debug-section"><h4>Технический контекст</h4><pre id="debugTech"></pre></div>
+  </dialog>
+
+  <dialog id="sceneDialog" class="sheet-dialog">
+    <div class="sheet-head">
+      <div><div class="eyebrow">DEBUG</div><h3>Сцены</h3></div>
+      <button class="close-btn" data-close="sceneDialog">×</button>
+    </div>
+    <input id="sceneSearch" class="search-input" placeholder="Поиск по ID или названию" />
+    <div id="sceneList" class="scene-list"></div>
+  </dialog>
+
+  <dialog id="importDialog" class="sheet-dialog import-dialog">
+    <div class="sheet-head">
+      <div><div class="eyebrow">ИМПОРТ</div><h3 id="importTitle">Разбор сценария</h3></div>
+      <button class="close-btn" data-close="importDialog">×</button>
+    </div>
+    <div id="importStatus" class="import-status"></div>
+  </dialog>
+
+  <dialog id="installDialog" class="sheet-dialog">
+    <div class="sheet-head">
+      <div><div class="eyebrow">PWA</div><h3>Добавить на экран</h3></div>
+      <button class="close-btn" data-close="installDialog">×</button>
+    </div>
+    <p>На iPhone: откройте меню «Поделиться» → «На экран Домой». На Android используйте пункт «Установить приложение» в браузере.</p>
+  </dialog>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="builtin-novel.js"></script>
+  <script src="parser.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
