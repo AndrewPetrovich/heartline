@@ -246,21 +246,43 @@ function compressedEdges(model, visible) {
   const { outgoing } = graphIndex(model);
   const result = [];
   const seen = new Set();
-  function walk(sourceId, edge, hiddenScenes, label, visited) {
+  function walk(sourceId, edge, hiddenScenes, label, optionId, visited) {
     if (visited.has(edge.to)) return;
     const nextVisited = new Set(visited); nextVisited.add(edge.to);
+    const carriedLabel = label || (edge.kind === 'option' ? edge.label || '' : '');
+    const carriedOptionId = optionId || (edge.kind === 'option' ? edge.optionId || null : null);
     if (visible.has(edge.to)) {
-      const key = `${sourceId}|${edge.to}|${label || edge.label || ''}`;
+      const key = `${sourceId}|${edge.to}|${carriedOptionId || ''}|${carriedLabel}`;
       if (!seen.has(key) && sourceId !== edge.to) {
         seen.add(key);
-        result.push({ from: sourceId, to: edge.to, kind: label ? 'option' : edge.kind, label: label || edge.label || '', hiddenScenes });
+        result.push({
+          from: sourceId,
+          to: edge.to,
+          kind: carriedLabel || carriedOptionId ? 'option' : edge.kind,
+          label: carriedLabel,
+          optionId: carriedOptionId,
+          hiddenScenes
+        });
       }
       return;
     }
     const count = String(edge.to).startsWith('scene:') ? hiddenScenes + 1 : hiddenScenes;
-    for (const next of outgoing.get(edge.to) || []) walk(sourceId, next, count, label || edge.label || '', nextVisited);
+    for (const next of outgoing.get(edge.to) || []) {
+      walk(sourceId, next, count, carriedLabel, carriedOptionId, nextVisited);
+    }
   }
-  for (const sourceId of visible) for (const edge of outgoing.get(sourceId) || []) walk(sourceId, edge, 0, edge.kind === 'option' ? edge.label || '' : '', new Set([sourceId]));
+  for (const sourceId of visible) {
+    for (const edge of outgoing.get(sourceId) || []) {
+      walk(
+        sourceId,
+        edge,
+        0,
+        edge.kind === 'option' ? edge.label || '' : '',
+        edge.kind === 'option' ? edge.optionId || null : null,
+        new Set([sourceId])
+      );
+    }
+  }
   return result;
 }
 
@@ -473,61 +495,246 @@ function renderStructure(host, model, options) {
 
 function chapterIndexMap(model) { return new Map(model.chapterOrder.map((c, i) => [c, i])); }
 
+function routeConnectionPath(from, to, parallelOffset = 0) {
+  const x1 = from.x + from.width;
+  const y1 = from.y + from.height / 2;
+  const x2 = to.x;
+  const y2 = to.y + to.height / 2;
+
+  // Normal left-to-right flow. Parallel choice options use a small vertical
+  // offset so A/B/C do not collapse into one invisible line.
+  if (x2 >= x1 + 16) {
+    const span = x2 - x1;
+    const bend = Math.max(34, Math.min(120, span * .42));
+    return `M${x1},${y1} C${x1 + bend},${y1 + parallelOffset} ${x2 - bend},${y2 + parallelOffset} ${x2},${y2}`;
+  }
+
+  // Rare backwards/rejoin connection: route it above the cards instead of
+  // drawing through them.
+  const lift = 56 + Math.abs(parallelOffset) + Math.abs(y2 - y1) * .18;
+  const topY = Math.min(y1, y2) - lift;
+  const rightX = Math.max(x1, x2) + 62;
+  return `M${x1},${y1} C${rightX},${y1} ${rightX},${topY} ${rightX - 24},${topY} H${x2 + 28} C${x2 + 10},${topY} ${x2 + 10},${y2} ${x2},${y2}`;
+}
+
 function renderRoutes(host, model, options) {
   const chapterIndex = chapterIndexMap(model);
-  const chapterWidth = 245, left = 150, top = 118;
-  const routeKeys = Object.keys(ROUTE_META).filter(key => key !== 'common' && model.nodes.some(n => n.kind === 'scene' && n.routeKey === key)).sort((a, b) => ROUTE_META[a].order - ROUTE_META[b].order);
-  const yMap = new Map([['common', top], ...routeKeys.map((key, i) => [key, top + 145 + i * 122])]);
-  const width = Math.max(1250, left + model.chapterOrder.length * chapterWidth + 240);
-  const height = Math.max(650, top + 145 + routeKeys.length * 122 + 110);
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('width', width); svg.setAttribute('height', height); svg.classList.add('story-graph-svg', 'graph-routes-view');
-
-  model.chapterOrder.forEach((ch, i) => { const x = left + i * chapterWidth; svg.append(svgEl(svg, 'line', { x1: x, x2: x, y1: 56, y2: height - 36, class: 'route-chapter-guide' })); const t = svgEl(svg, 'text', { x: x + 8, y: 42, class: 'route-chapter-label' }); t.textContent = ch; svg.append(t); });
-  const commonY = yMap.get('common');
-  const branchCandidates = model.nodes.filter(n => n.kind === 'scene' && n.routeKey !== 'common').sort((a, b) => a.order - b.order);
-  const branchChapter = branchCandidates[0]?.chapterTitle || model.chapterOrder[1] || model.chapterOrder[0];
-  const branchX = left + (chapterIndex.get(branchChapter) || 1) * chapterWidth + 50;
-  const endX = width - 180;
-
-  const commonPath = svgEl(svg, 'path', { d: `M70,${commonY} C${branchX * .42},${commonY} ${branchX * .72},${commonY} ${branchX},${commonY}`, class: 'route-flow route-common' }); svg.append(commonPath);
-  for (const key of routeKeys) {
-    const meta = ROUTE_META[key], y = yMap.get(key);
-    const path = svgEl(svg, 'path', { d: `M${branchX},${commonY} C${branchX + 90},${commonY} ${branchX + 95},${y} ${branchX + 180},${y} C${branchX + 320},${y} ${endX - 180},${y} ${endX},${y}`, class: `route-flow route-${key}` }); svg.append(path);
-    const label = svgEl(svg, 'text', { x: 18, y: y + 5, class: `route-flow-label route-${key}` }); label.textContent = meta.label; svg.append(label);
-  }
-  const branchCircle = svgEl(svg, 'circle', { cx: branchX, cy: commonY, r: 12, class: 'route-branch-station' }); svg.append(branchCircle);
-
+  const chapterWidth = 255, left = 150, top = 118;
+  const routeKeys = Object.keys(ROUTE_META)
+    .filter(key => key !== 'common' && model.nodes.some(n => n.kind === 'scene' && n.routeKey === key))
+    .sort((a, b) => ROUTE_META[a].order - ROUTE_META[b].order);
+  const { incoming, outgoing } = graphIndex(model);
   const q = String(options.search || '').trim().toLowerCase();
+
+  // Route analysis must show the decisions themselves, not only one arbitrary
+  // choice per chapter. Keep one anchor scene per chapter, all decisions, and
+  // structural merge/split scenes. The graph remains compact because ordinary
+  // linear scenes are compressed into the connections between these nodes.
   const selectedNodes = [];
-  // Common line: show one scene per chapter plus structural choices.
   for (const ch of model.chapterOrder) {
     const chapterNodes = model.nodes.filter(n => n.chapterTitle === ch);
-    const choices = chapterNodes.filter(n => n.kind === 'choice');
-    const common = chapterNodes.filter(n => n.kind === 'scene' && n.routeKey === 'common').sort((a, b) => a.order - b.order);
+    const common = chapterNodes
+      .filter(n => n.kind === 'scene' && n.routeKey === 'common')
+      .sort((a, b) => a.order - b.order);
     if (common[0]) selectedNodes.push(common[0]);
-    if (choices[0]) selectedNodes.push(choices[0]);
+
+    for (const choice of chapterNodes.filter(n => n.kind === 'choice').sort((a, b) => a.order - b.order)) {
+      selectedNodes.push(choice);
+    }
+
+    for (const node of common) {
+      const indegree = incoming.get(node.id)?.length || 0;
+      const outdegree = outgoing.get(node.id)?.length || 0;
+      if (indegree > 1 || outdegree > 1 || node.end || node.sceneId === options.currentSceneId) selectedNodes.push(node);
+    }
+
     for (const key of routeKeys) {
-      const routeScenes = chapterNodes.filter(n => n.kind === 'scene' && n.routeKey === key).sort((a, b) => a.order - b.order);
+      const routeScenes = chapterNodes
+        .filter(n => n.kind === 'scene' && n.routeKey === key)
+        .sort((a, b) => a.order - b.order);
       if (routeScenes[0]) selectedNodes.push(routeScenes[0]);
-      const ending = routeScenes.find(n => n.end); if (ending && ending !== routeScenes[0]) selectedNodes.push(ending);
+      const ending = routeScenes.find(n => n.end);
+      if (ending && ending !== routeScenes[0]) selectedNodes.push(ending);
     }
   }
-  if (q) for (const node of model.nodes) if (nodeSearchText(node).includes(q)) selectedNodes.push(node);
-  const uniq = [...new Map(selectedNodes.map(n => [n.id, n])).values()];
-  const perSlot = new Map();
+
+  // Search/filter results are always promoted to visible nodes so a filtered
+  // graph still shows where the matching scene sits in the route.
+  if (q || options.filter !== 'all') {
+    for (const node of model.nodes) {
+      if (nodeMatches(node, options.filter, options.search, options.visitedSceneIds)) selectedNodes.push(node);
+    }
+  }
+
+  const uniq = [...new Map(selectedNodes.map(n => [n.id, n])).values()]
+    .sort((a, b) => {
+      const ca = chapterIndex.get(a.chapterTitle) || 0;
+      const cb = chapterIndex.get(b.chapterTitle) || 0;
+      if (ca !== cb) return ca - cb;
+      const ra = ROUTE_META[a.routeKey || 'common']?.order ?? 99;
+      const rb = ROUTE_META[b.routeKey || 'common']?.order ?? 99;
+      if (ra !== rb) return ra - rb;
+      return a.order - b.order || (a.kind === 'scene' ? -1 : 1);
+    });
+
+  // Count nodes in every chapter/lane before assigning Y positions. This keeps
+  // route lanes below the tallest common decision stack instead of letting
+  // cards collide with the colored flow lanes.
+  const slotCounts = new Map();
   for (const node of uniq) {
     const ci = chapterIndex.get(node.chapterTitle) || 0;
     const key = node.routeKey || 'common';
-    const slot = `${ci}:${key}`; const offset = perSlot.get(slot) || 0; perSlot.set(slot, offset + 1);
+    const slot = `${ci}:${key}`;
+    slotCounts.set(slot, (slotCounts.get(slot) || 0) + 1);
+  }
+  const maxCommonRows = Math.max(1, ...model.chapterOrder.map((_, ci) => slotCounts.get(`${ci}:common`) || 0));
+  const firstRouteY = top + Math.max(150, maxCommonRows * 70 + 74);
+  const yMap = new Map([['common', top], ...routeKeys.map((key, i) => [key, firstRouteY + i * 122])]);
+  const width = Math.max(1250, left + model.chapterOrder.length * chapterWidth + 250);
+  const commonBottom = top - 40 + Math.max(1, maxCommonRows) * 70 + 58;
+  const routeBottom = routeKeys.length ? firstRouteY + (routeKeys.length - 1) * 122 + 100 : commonBottom + 100;
+  const height = Math.max(650, commonBottom + 90, routeBottom);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+  svg.classList.add('story-graph-svg', 'graph-routes-view', routeKeys.length ? 'has-route-lanes' : 'no-route-lanes');
+
+  const defs = svgEl(svg, 'defs');
+  defs.innerHTML = `
+    <marker id="route-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="#858983"/></marker>
+    <marker id="route-arrow-option" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="#7565d8"/></marker>`;
+  svg.append(defs);
+
+  model.chapterOrder.forEach((ch, i) => {
+    const x = left + i * chapterWidth;
+    svg.append(svgEl(svg, 'line', { x1: x, x2: x, y1: 56, y2: height - 36, class: 'route-chapter-guide' }));
+    const t = svgEl(svg, 'text', { x: x + 8, y: 42, class: 'route-chapter-label' });
+    t.textContent = ch;
+    svg.append(t);
+  });
+
+  const commonY = yMap.get('common');
+  // Wide colored ribbons are meaningful only if the source data actually has
+  // persistent route lanes (EQUAL/FIRE/MASK/etc.). For branch-lattice stories
+  // where choices reconverge, omit the misleading single grey ribbon and rely
+  // on the real directed connections drawn below.
+  if (routeKeys.length) {
+    const branchCandidates = model.nodes
+      .filter(n => n.kind === 'scene' && n.routeKey !== 'common')
+      .sort((a, b) => a.order - b.order);
+    const branchChapter = branchCandidates[0]?.chapterTitle || model.chapterOrder[1] || model.chapterOrder[0];
+    const branchX = left + (chapterIndex.get(branchChapter) || 1) * chapterWidth + 50;
+    const endX = width - 180;
+    const commonPath = svgEl(svg, 'path', {
+      d: `M70,${commonY} C${branchX * .42},${commonY} ${branchX * .72},${commonY} ${branchX},${commonY}`,
+      class: 'route-flow route-common'
+    });
+    svg.append(commonPath);
+    for (const key of routeKeys) {
+      const meta = ROUTE_META[key], y = yMap.get(key);
+      const path = svgEl(svg, 'path', {
+        d: `M${branchX},${commonY} C${branchX + 90},${commonY} ${branchX + 95},${y} ${branchX + 180},${y} C${branchX + 320},${y} ${endX - 180},${y} ${endX},${y}`,
+        class: `route-flow route-${key}`
+      });
+      svg.append(path);
+      const label = svgEl(svg, 'text', { x: 18, y: y + 5, class: `route-flow-label route-${key}` });
+      label.textContent = meta.label;
+      svg.append(label);
+    }
+    svg.append(svgEl(svg, 'circle', { cx: branchX, cy: commonY, r: 12, class: 'route-branch-station' }));
+  }
+
+  const perSlot = new Map();
+  const positions = new Map();
+  const matchState = new Map();
+  for (const node of uniq) {
+    const ci = chapterIndex.get(node.chapterTitle) || 0;
+    const key = node.routeKey || 'common';
+    const slot = `${ci}:${key}`;
+    const offset = perSlot.get(slot) || 0;
+    perSlot.set(slot, offset + 1);
     const yBase = yMap.get(key) ?? commonY;
-    const pos = { x: left + ci * chapterWidth + 18, y: yBase - 40 + offset * 72, width: node.kind === 'choice' ? 188 : 168, height: 58 };
+    const pos = {
+      x: left + ci * chapterWidth + 18,
+      y: yBase - 40 + offset * 70,
+      width: node.kind === 'choice' ? 190 : 170,
+      height: 58
+    };
+    positions.set(node.id, pos);
     const matched = (options.filter !== 'all' || q) && nodeMatches(node, options.filter, options.search, options.visitedSceneIds);
     const dimmed = (options.filter !== 'all' || q) && !matched;
-    svg.append(makeNodeGroup(svg, node, pos, { ...options, matched, dimmed, compact: true }));
+    matchState.set(node.id, { matched, dimmed });
   }
-  svg.__heartlineGeometry = { width, height };
-  host.replaceChildren(svg); return svg;
+
+  // Draw the REAL graph connections between the representative nodes. Linear
+  // scenes between them are compressed; choice options keep their A/B/C IDs.
+  const visible = new Set(uniq.map(node => node.id));
+  const routeEdges = compressedEdges(model, visible);
+  const pairTotals = new Map();
+  for (const edge of routeEdges) {
+    const key = `${edge.from}|${edge.to}`;
+    pairTotals.set(key, (pairTotals.get(key) || 0) + 1);
+  }
+  const pairSeen = new Map();
+  const edgeLayer = svgEl(svg, 'g', { class: 'route-connections' });
+  for (const edge of routeEdges) {
+    const from = positions.get(edge.from);
+    const to = positions.get(edge.to);
+    if (!from || !to) continue;
+    const pairKey = `${edge.from}|${edge.to}`;
+    const total = pairTotals.get(pairKey) || 1;
+    const index = pairSeen.get(pairKey) || 0;
+    pairSeen.set(pairKey, index + 1);
+    const parallelOffset = (index - (total - 1) / 2) * 18;
+    const dimmed = Boolean(matchState.get(edge.from)?.dimmed && matchState.get(edge.to)?.dimmed);
+    const path = svgEl(svg, 'path', {
+      d: routeConnectionPath(from, to, parallelOffset),
+      class: `route-connection ${edge.kind || 'sequence'}${dimmed ? ' dimmed' : ''}`,
+      'marker-end': edge.kind === 'option' ? 'url(#route-arrow-option)' : 'url(#route-arrow)'
+    });
+    const title = svgEl(svg, 'title');
+    title.textContent = edge.label || (edge.hiddenScenes ? `${edge.hiddenScenes} скрытых сцен` : 'Переход');
+    path.append(title);
+    edgeLayer.append(path);
+
+    const shortLabel = edge.optionId
+      ? String(edge.optionId)
+      : edge.kind === 'goto'
+        ? 'GOTO'
+        : edge.hiddenScenes > 1
+          ? `+${edge.hiddenScenes} сцен`
+          : '';
+    if (shortLabel) {
+      const label = svgEl(svg, 'text', {
+        x: (from.x + from.width + to.x) / 2,
+        y: (from.y + from.height / 2 + to.y + to.height / 2) / 2 + parallelOffset - 6,
+        class: `route-connection-label ${edge.kind || 'sequence'}${dimmed ? ' dimmed' : ''}`
+      });
+      label.textContent = shortLabel;
+      edgeLayer.append(label);
+    }
+  }
+  svg.append(edgeLayer);
+
+  const nodeLayer = svgEl(svg, 'g', { class: 'route-nodes' });
+  for (const node of uniq) {
+    const pos = positions.get(node.id);
+    if (!pos) continue;
+    const state = matchState.get(node.id) || {};
+    nodeLayer.append(makeNodeGroup(svg, node, pos, {
+      ...options,
+      matched: state.matched,
+      dimmed: state.dimmed,
+      compact: true
+    }));
+  }
+  svg.append(nodeLayer);
+
+  svg.__heartlineGeometry = { width, height, positions };
+  host.replaceChildren(svg);
+  return svg;
 }
 
 function renderMetro(host, model, options) {
