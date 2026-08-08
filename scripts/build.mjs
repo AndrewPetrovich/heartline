@@ -1,0 +1,11 @@
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, writeFile, copyFile, rm } from 'node:fs/promises';
+import { basename } from 'node:path';
+const dist=new URL('../dist/',import.meta.url); await rm(dist,{recursive:true,force:true}); await mkdir(dist,{recursive:true});
+const fixed=['heartline-graph.js','heartline-engine.js','heartline-db.js','heartline-domain.js','heartline-assets.js','heartline-image-worker.js','heartline-player-renderer.js','heartline-parser.js','heartline-exporter.js','novel.json','moon-oath.json','manifest.webmanifest','icon-192.png','icon-512.png','.nojekyll'];
+for(const file of fixed) await copyFile(new URL(`../${file}`,import.meta.url),new URL(file,dist));
+const hash=s=>createHash('sha256').update(s).digest('hex').slice(0,10); const app=await readFile(new URL('../heartline-app.js',import.meta.url)); const css=await readFile(new URL('../heartline-app.css',import.meta.url)); const appName=`app.${hash(app)}.js`; const cssName=`styles.${hash(css)}.css`; await writeFile(new URL(appName,dist),app); await writeFile(new URL(cssName,dist),css);
+let html=await readFile(new URL('../index.html',import.meta.url),'utf8'); html=html.replace('heartline-app.css',cssName).replace('heartline-app.js',appName); await writeFile(new URL('index.html',dist),html);
+const core=['./','./index.html',`./${appName}`,`./${cssName}`,...fixed.filter(x=>x!=='.nojekyll').map(x=>`./${x}`)];
+const sw=`const CACHE='heartline-build-${hash(app)}';const CORE=${JSON.stringify(core)};self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(CORE)).then(()=>self.skipWaiting())));self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==CACHE).map(x=>caches.delete(x)))).then(()=>self.clients.claim())));self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;const u=new URL(e.request.url);if(u.origin!==location.origin)return;e.respondWith(fetch(e.request).then(r=>{if(r.ok)caches.open(CACHE).then(c=>c.put(e.request,r.clone()));return r}).catch(()=>caches.match(e.request).then(r=>r||(e.request.mode==='navigate'?caches.match('./index.html'):Promise.reject()))))});`;
+await writeFile(new URL('sw.js',dist),sw); console.log(`Built ${appName} + ${cssName}`);

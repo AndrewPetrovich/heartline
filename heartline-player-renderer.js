@@ -1,4 +1,4 @@
-import { escapeHtml, frameDiagnostics, visualForDevice } from './heartline-v301-domain.js';
+import { escapeHtml, frameDiagnostics, visualForDevice } from './heartline-domain.js';
 
 export const DEVICE_PRESETS = {
   compact: { id: 'compact', label: 'Компактный · 320×568', width: 320, height: 568, safeTop: 20, safeBottom: 16, fontSize: 16 },

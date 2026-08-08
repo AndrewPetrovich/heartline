@@ -1,4 +1,4 @@
-import { escapeHtml, sceneFrameMetrics } from './heartline-v301-domain.js';
+import { escapeHtml, sceneFrameMetrics } from './heartline-domain.js';
 
 const ROUTE_META = {
   common: { label: 'Общая линия', order: 0, color: '#2f3130', soft: '#eef0ed' },

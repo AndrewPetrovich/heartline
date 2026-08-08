@@ -1,16 +1,28 @@
-// HEARTLINE Editor v3.0.5 Reader UX — stable cross-device Reader shell
-import * as DB from './heartline-v301-db.js';
-import * as Domain from './heartline-v301-domain.js';
-import { StoryEngine, createSession } from './heartline-v304-engine.js';
-import * as Assets from './heartline-v301-assets.js';
-import { DEVICE_PRESETS, renderPlayerFrame, renderDeviceComparison, orientedDevice } from './heartline-v301-player-renderer.js';
-import { buildGraph, layoutGraph, renderGraph, renderGraphOutline, renderGraphMinimap, enableGraphNavigation } from './heartline-v304-graph.js';
+// HEARTLINE Editor 3.1 Quality Pass — cross-device Reader, review, diff and preflight workflow
+import * as DB from './heartline-db.js';
+import * as Domain from './heartline-domain.js';
+import { StoryEngine, createSession } from './heartline-engine.js';
+import * as Assets from './heartline-assets.js';
+import { DEVICE_PRESETS, renderPlayerFrame, renderDeviceComparison, orientedDevice } from './heartline-player-renderer.js';
+import { buildGraph, layoutGraph, renderGraph, renderGraphOutline, renderGraphMinimap, enableGraphNavigation } from './heartline-graph.js';
 
 const $ = id => document.getElementById(id);
 const view = $('view');
 const modal = $('modal');
 const exporter = window.HEARTLINEExporter;
 const parser = window.HEARTLINEParser;
+
+
+const READER_PREFS_KEY = 'heartline-reader-prefs-v1';
+function loadReaderPrefs() {
+  const defaults = { context: 'auto', textScale: 1, lineHeight: 1.58, font: 'serif', columnWidth: 790, focus: false };
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{}') }; }
+  catch (_) { return defaults; }
+}
+function persistReaderPrefs() {
+  localStorage.setItem(READER_PREFS_KEY, JSON.stringify({ context: state.readerContextCount, textScale: state.readerTextScale, lineHeight: state.readerLineHeight, font: state.readerFont, columnWidth: state.readerColumnWidth, focus: state.readerFocus }));
+}
+const INITIAL_READER_PREFS = loadReaderPrefs();
 
 const state = {
   route: 'library',
@@ -30,11 +42,22 @@ const state = {
   selectedFragmentId: null,
   selectedSceneId: null,
   inspectorTab: 'frame',
-  readerContextCount: 'auto',
+  readerContextCount: INITIAL_READER_PREFS.context,
+  readerTextScale: INITIAL_READER_PREFS.textScale,
+  readerLineHeight: INITIAL_READER_PREFS.lineHeight,
+  readerFont: INITIAL_READER_PREFS.font,
+  readerColumnWidth: INITIAL_READER_PREFS.columnWidth,
+  readerFocus: INITIAL_READER_PREFS.focus,
   storyboardFilter: 'all',
   storyboardSelection: new Set(),
+  storyboardLimit: 60,
   assetSearch: '',
+  assetLimit: 80,
   reviewFilter: 'open',
+  reviewGroup: 'scene',
+  reviewSearch: '',
+  reviewSelected: new Set(),
+  reviewSearchTimer: null,
   previewDeviceId: 'iphone390',
   previewOrientation: 'portrait',
   previewCompare: false,
@@ -64,6 +87,11 @@ function toast(message, timeout = 2600) {
 
 function setActiveNav(route) {
   document.querySelectorAll('[data-route]').forEach(button => button.classList.toggle('active', button.dataset.route === route));
+  document.querySelectorAll('.nav-group').forEach(group => {
+    const active = Boolean(group.querySelector(`[data-route="${route}"]`));
+    group.classList.toggle('active', active);
+    if (!active) group.removeAttribute('open');
+  });
 }
 
 async function setRoute(route) {
@@ -403,7 +431,7 @@ function openReviewForm({ fragmentId = state.selectedFragmentId, targetType = 't
   };
 }
 
-async function updateReviewStatus(reviewId, status) {
+async function updateReviewStatus(reviewId, status, { rerender = true } = {}) {
   const review = state.reviews.find(item => item.reviewId === reviewId);
   if (!review) return;
   review.status = status;
@@ -434,15 +462,36 @@ function metricsHtml(metrics) {
     <div class="metric"><strong>${metrics.openReviews}</strong><span>открытых замечаний</span></div>`;
 }
 
+
+function openMobileMoreMenu() {
+  openModal({ kicker: 'НАВИГАЦИЯ', title: 'Ещё', body: `<div class="mobile-more-grid"><button class="button secondary" data-more-route="assets">Изображения</button><button class="button secondary" data-more-route="reviews">Замечания</button><button class="button secondary" data-more-route="versions">Версии</button><button class="button secondary" data-more-route="gpt">GPT</button><button class="button secondary" data-more-route="graph">Граф</button><button class="button secondary" data-more-route="export">Экспорт</button></div>`, footer: '<button id="closeMoreMenu" class="button primary">Готово</button>' });
+  $('closeMoreMenu').onclick = closeModal;
+  $('modalBody').querySelectorAll('[data-more-route]').forEach(button => button.onclick = async () => { const route = button.dataset.moreRoute; closeModal(); await setRoute(route); });
+}
+
+function applyReaderPreferences() {
+  const shell = $('readerShell'); if (!shell) return;
+  shell.style.setProperty('--reader-text-scale', String(state.readerTextScale));
+  shell.style.setProperty('--reader-line-height', String(state.readerLineHeight));
+  shell.style.setProperty('--reader-column-width', `${state.readerColumnWidth}px`);
+  shell.classList.toggle('reader-font-sans', state.readerFont === 'sans');
+  shell.classList.toggle('reader-focus', Boolean(state.readerFocus));
+}
+
+async function projectLibraryMetrics(project) {
+  try {
+    const [version, workspace, assignments, reviews] = await Promise.all([DB.get('versions', project.activeVersionId), DB.get('workspaceDrafts', project.projectId), DB.getAllByIndex('visualAssignments', 'scopeId', DB.workspaceScope(project.projectId)), DB.getAllByIndex('reviews', 'projectId', project.projectId)]);
+    if (!version?.content) return null;
+    return Domain.projectMetrics(version.content, workspace || { textEdits: {} }, assignments, reviews);
+  } catch (_) { return null; }
+}
+
 async function renderLibrary() {
   await loadCollections();
+  const dashboard = new Map();
+  await Promise.all(state.projects.map(async project => dashboard.set(project.projectId, await projectLibraryMetrics(project))));
   view.className = 'view';
-  view.innerHTML = `<section class="page">
-    <header class="page-header"><div><span class="kicker">HEARTLINE EDITOR V3</span><h1>Проекты новелл</h1><p>Текст, изображения, ветвления и мобильная композиция в одном рабочем цикле.</p></div>
-    <div class="header-actions"><button id="importNovelButton" class="button secondary">Импорт сценария</button><button id="importProjectButton" class="button primary">Импорт Project ZIP</button></div></header>
-    <div class="project-list">${state.projects.map(project => `<article class="card project-card"><div><span class="kicker">ПРОЕКТ</span><h2>${Domain.escapeHtml(project.title)}</h2></div><div class="project-card-meta"><span>${Domain.escapeHtml(project.activeVersionId)}</span><span>${Domain.formatDate(project.updatedAt)}</span></div><div class="project-card-actions"><button class="button primary" data-open-project="${Domain.escapeHtml(project.projectId)}">Открыть</button></div></article>`).join('')}</div>
-    ${state.projects.length ? '' : '<div class="empty-state"><div><h2>Библиотека пуста</h2><p>Импортируйте DOCX, JSON или Project ZIP.</p></div></div>'}
-  </section>`;
+  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">HEARTLINE EDITOR 3.1</span><h1>Проекты новелл</h1><p>Текст, изображения, ветвления и мобильная композиция в одном рабочем цикле.</p></div><div class="header-actions"><button id="importNovelButton" class="button secondary">Импорт сценария</button><button id="importProjectButton" class="button primary">Импорт Project ZIP</button></div></header><div class="library-sync-note card pad"><div><span class="status-badge draft">Локальный режим</span><strong>Проекты сохраняются в этом браузере.</strong><p>Для переноса на другое устройство используйте Project ZIP. Сервер cloud sync в статическом GitHub Pages не подключён.</p></div></div><div class="project-list">${state.projects.map(project => { const m = dashboard.get(project.projectId); return `<article class="card project-card"><div><span class="kicker">ПРОЕКТ</span><h2>${Domain.escapeHtml(project.title)}</h2></div><div class="project-card-meta"><span>${Domain.escapeHtml(project.activeVersionId)}</span><span>${Domain.formatDate(project.updatedAt)}</span></div>${m ? `<div class="project-dashboard"><div><span>Кадры</span><b>${m.frames}</b></div><div><span>Визуалы</span><b>${m.assignedPercent}%</b></div><div><span>Замечания</span><b>${m.openReviews}</b></div></div><div class="progress"><span style="width:${m.assignedPercent}%"></span></div><small class="muted">Без изображения: ${m.missing} · требуют проверки: ${m.needsReview}</small>` : ''}<div class="project-card-actions"><button class="button primary" data-open-project="${Domain.escapeHtml(project.projectId)}">Продолжить</button></div></article>`; }).join('')}</div>${state.projects.length ? '' : '<div class="empty-state"><div><h2>Библиотека пуста</h2><p>Импортируйте DOCX, JSON или Project ZIP.</p></div></div>'}</section>`;
   $('importNovelButton').onclick = () => { $('novelInput').value = ''; $('novelInput').click(); };
   $('importProjectButton').onclick = () => { $('projectImportInput').value = ''; $('projectImportInput').click(); };
   view.querySelectorAll('[data-open-project]').forEach(button => button.onclick = () => openProject(button.dataset.openProject));
@@ -560,33 +609,16 @@ function closeReaderSheet() {
 
 function openReaderTools() {
   const context = state.readerContextCount;
-  openReaderSheet({
-    title: 'Инструменты чтения',
-    body: `<div class="reader-tool-grid">
-      <button id="readerToolPreview" class="button secondary">Мобильное превью</button>
-      <button id="readerToolInspector" class="button secondary">Инспектор кадра</button>
-      <button id="readerToolFirst" class="button secondary">Первая реплика</button>
-      <button id="readerToolLast" class="button secondary">Последняя реплика</button>
-    </div>
-    <section class="reader-sheet-section"><span class="kicker">КОНТЕКСТ</span><p class="muted">Сколько предыдущих реплик показывать над текущей.</p><div class="reader-context-picker">
-      <button class="button ${context === 0 ? 'primary' : 'secondary'}" data-reader-context="0">Нет</button>
-      <button class="button ${context === 1 ? 'primary' : 'secondary'}" data-reader-context="1">1</button>
-      <button class="button ${context === 2 ? 'primary' : 'secondary'}" data-reader-context="2">2</button>
-      <button class="button ${context === 'auto' ? 'primary' : 'secondary'}" data-reader-context="auto">Авто</button>
-    </div></section>`,
-    footer: `<button id="readerToolsClose" class="button primary">Готово</button>`
-  });
+  openReaderSheet({ title: 'Инструменты чтения', body: `<div class="reader-tool-grid"><button id="readerToolPreview" class="button secondary">Мобильное превью</button><button id="readerToolInspector" class="button secondary">Инспектор кадра</button><button id="readerToolFirst" class="button secondary">Первая реплика</button><button id="readerToolLast" class="button secondary">Последняя реплика</button><button id="readerToolFocus" class="button ${state.readerFocus ? 'primary' : 'secondary'}">${state.readerFocus ? 'Выйти из фокуса' : 'Режим фокуса'}</button></div><section class="reader-sheet-section"><span class="kicker">КОНТЕКСТ</span><p class="muted">Сколько предыдущих реплик показывать над текущей.</p><div class="reader-context-picker"><button class="button ${context === 0 ? 'primary' : 'secondary'}" data-reader-context="0">Нет</button><button class="button ${context === 1 ? 'primary' : 'secondary'}" data-reader-context="1">1</button><button class="button ${context === 2 ? 'primary' : 'secondary'}" data-reader-context="2">2</button><button class="button ${context === 'auto' ? 'primary' : 'secondary'}" data-reader-context="auto">Авто</button></div></section><section class="reader-sheet-section"><span class="kicker">ТИПОГРАФИКА</span><label class="field"><span>Размер текста · ${Math.round(state.readerTextScale * 100)}%</span><input id="readerTextScale" type="range" min="0.9" max="1.3" step="0.05" value="${state.readerTextScale}"></label><label class="field"><span>Интерлиньяж</span><input id="readerLineHeight" type="range" min="1.45" max="1.8" step="0.05" value="${state.readerLineHeight}"></label><label class="field"><span>Шрифт</span><select id="readerFont" class="select"><option value="serif" ${state.readerFont === 'serif' ? 'selected' : ''}>Литературный serif</option><option value="sans" ${state.readerFont === 'sans' ? 'selected' : ''}>Нейтральный sans-serif</option></select></label><label class="field"><span>Ширина колонки</span><select id="readerColumnWidth" class="select"><option value="680" ${state.readerColumnWidth == 680 ? 'selected' : ''}>Узкая · 680 px</option><option value="790" ${state.readerColumnWidth == 790 ? 'selected' : ''}>Стандарт · 790 px</option><option value="900" ${state.readerColumnWidth == 900 ? 'selected' : ''}>Широкая · 900 px</option></select></label></section>`, footer: `<button id="readerToolsClose" class="button primary">Готово</button>` });
   $('readerToolPreview').onclick = () => { closeReaderSheet(); setRoute('preview'); };
   $('readerToolInspector').onclick = () => { closeReaderSheet(); view.querySelector('.reader-inspector')?.classList.add('open'); updateReaderBackdrop(); };
   $('readerToolFirst').onclick = () => { closeReaderSheet(); selectFragment(currentFrames()[0]?.fragmentId, { direct: true }); };
   $('readerToolLast').onclick = () => { closeReaderSheet(); selectFragment(currentFrames().at(-1)?.fragmentId, { direct: true }); };
+  $('readerToolFocus').onclick = () => { state.readerFocus = !state.readerFocus; persistReaderPrefs(); closeReaderSheet(); applyReaderPreferences(); };
   $('readerToolsClose').onclick = closeReaderSheet;
-  view.querySelectorAll('[data-reader-context]').forEach(button => button.onclick = async () => {
-    const value = button.dataset.readerContext;
-    state.readerContextCount = value === 'auto' ? 'auto' : Number(value);
-    closeReaderSheet();
-    await refreshReaderContent({ resetScroll: true });
-  });
+  view.querySelectorAll('[data-reader-context]').forEach(button => button.onclick = async () => { const value = button.dataset.readerContext; state.readerContextCount = value === 'auto' ? 'auto' : Number(value); persistReaderPrefs(); closeReaderSheet(); await refreshReaderContent({ resetScroll: true }); });
+  const applyPrefInputs = () => { state.readerTextScale = Number($('readerTextScale').value); state.readerLineHeight = Number($('readerLineHeight').value); state.readerFont = $('readerFont').value; state.readerColumnWidth = Number($('readerColumnWidth').value); persistReaderPrefs(); applyReaderPreferences(); };
+  ['readerTextScale','readerLineHeight'].forEach(id => $(id).oninput = applyPrefInputs); ['readerFont','readerColumnWidth'].forEach(id => $(id).onchange = applyPrefInputs);
 }
 
 function openMobileFrameEditor(frame) {
@@ -611,10 +643,8 @@ async function refreshReaderContent({ resetScroll = true, updateInspector = true
   if (!$('readerShell')) return renderReader();
   syncSelectedWithEngine();
   const frame = effectiveFrame();
-  const title = $('readerTitleMain');
-  const meta = $('readerTitleMeta');
-  if (title) title.textContent = frame ? `${frame.chapterTitle} · ${frame.sceneTitle}` : 'Кадр не выбран';
-  if (meta) meta.textContent = frame ? `${frame.fragmentId} · ${Domain.textTypeLabel(frame.type)}` : '';
+  view.querySelectorAll('.reader-title-main').forEach(title => title.textContent = frame ? `${frame.chapterTitle} · ${frame.sceneTitle}` : 'Кадр не выбран');
+  view.querySelectorAll('.reader-title-meta').forEach(meta => meta.textContent = frame ? `${frame.fragmentId} · ${Domain.textTypeLabel(frame.type)}` : '');
   const scroll = $('readerScroll');
   if (scroll) scroll.innerHTML = readerCurrentHtml();
   view.querySelectorAll('[data-scene-id]').forEach(button => button.classList.toggle('active', button.dataset.sceneId === state.selectedSceneId));
@@ -625,6 +655,7 @@ async function refreshReaderContent({ resetScroll = true, updateInspector = true
   await hydrateImages(scroll || view);
   if (updateInspector && $('inspectorBody')) await hydrateImages($('inspectorBody'));
   wireReader(frame);
+  applyReaderPreferences();
   if (resetScroll && scroll) requestAnimationFrame(() => scroll.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
   return frame;
 }
@@ -634,15 +665,10 @@ async function renderReader() {
   syncSelectedWithEngine();
   const frame = effectiveFrame();
   view.className = 'view reader-route';
-  view.innerHTML = `<section class="page full"><div id="readerShell" class="reader-layout">
-    <aside class="reader-sidebar"><div class="reader-pane-head"><h2>${Domain.escapeHtml(state.project.title)}</h2><p>${Domain.escapeHtml(state.version.label)}</p></div><div class="scene-search"><input id="sceneSearch" class="input" placeholder="Сцена или ID"></div><div id="sceneTree" class="scene-tree">${readerSceneTree()}</div></aside>
-    <section class="reader-center"><header class="reader-toolbar"><button id="toggleScenes" class="button secondary small reader-structure-button" aria-label="Открыть структуру"><span class="reader-desktop-label">Структура</span><span class="reader-mobile-label">☰</span></button><div class="reader-title"><strong id="readerTitleMain">${frame ? Domain.escapeHtml(`${frame.chapterTitle} · ${frame.sceneTitle}`) : 'Кадр не выбран'}</strong><span id="readerTitleMeta">${frame ? Domain.escapeHtml(`${frame.fragmentId} · ${Domain.textTypeLabel(frame.type)}`) : ''}</span></div><div class="reader-toolbar-actions"><button id="openPreviewTop" class="button secondary small reader-desktop-tool">Превью</button><button id="toggleInspector" class="button secondary small reader-desktop-tool">Инспектор</button><button id="readerMore" class="button secondary small reader-mobile-more" aria-label="Инструменты чтения">•••</button></div></header><div id="readerScroll" class="reader-scroll">${readerCurrentHtml()}</div><footer class="reader-bottom"><button id="firstFrame" class="button secondary reader-edge-nav">Первая</button><button id="backFrame" class="button secondary reader-primary-nav">← Назад</button><button id="forwardFrame" class="button primary reader-primary-nav">Вперёд →</button><button id="lastFrame" class="button secondary reader-edge-nav">Последняя</button></footer></section>
-    <aside class="reader-inspector"><div class="inspector-tabs"><button class="inspector-tab ${state.inspectorTab === 'frame' ? 'active' : ''}" data-inspector-tab="frame">Кадр</button><button class="inspector-tab ${state.inspectorTab === 'image' ? 'active' : ''}" data-inspector-tab="image">Изображение</button><button class="inspector-tab ${state.inspectorTab === 'reviews' ? 'active' : ''}" data-inspector-tab="reviews">Замечания</button></div><div id="inspectorBody" class="inspector-body">${readerInspectorHtml(frame)}</div></aside>
-    <div id="readerDrawerBackdrop" class="reader-drawer-backdrop" aria-hidden="true"></div>
-    <section id="readerMobileSheet" class="reader-mobile-sheet" aria-hidden="true"><header class="reader-sheet-head"><h2 id="readerSheetTitle"></h2><button id="readerSheetClose" class="icon-button" aria-label="Закрыть">×</button></header><div id="readerSheetBody" class="reader-sheet-body"></div><footer id="readerSheetFooter" class="reader-sheet-footer"></footer></section>
-  </div></section>`;
+  view.innerHTML = `<section class="page full"><div id="readerShell" class="reader-layout"><aside class="reader-sidebar"><div class="reader-pane-head"><h2>${Domain.escapeHtml(state.project.title)}</h2><p>${Domain.escapeHtml(state.version.label)}</p></div><div class="scene-search"><input id="sceneSearch" class="input" placeholder="Сцена или ID"></div><div id="sceneTree" class="scene-tree">${readerSceneTree()}</div></aside><section class="reader-center"><header class="reader-toolbar reader-toolbar-desktop"><button data-reader-action="scenes" class="button secondary small">Структура</button><div class="reader-title"><strong class="reader-title-main">${frame ? Domain.escapeHtml(`${frame.chapterTitle} · ${frame.sceneTitle}`) : 'Кадр не выбран'}</strong><span class="reader-title-meta">${frame ? Domain.escapeHtml(`${frame.fragmentId} · ${Domain.textTypeLabel(frame.type)}`) : ''}</span></div><div class="reader-toolbar-actions"><button data-reader-action="focus" class="button secondary small">Фокус</button><button data-reader-action="settings" class="button secondary small">Настройки</button><button data-reader-action="preview" class="button secondary small">Превью</button><button data-reader-action="inspector" class="button secondary small">Инспектор</button></div></header><header class="reader-toolbar reader-toolbar-mobile"><button data-reader-action="scenes" class="button secondary reader-mobile-icon" aria-label="Открыть структуру">☰</button><div class="reader-title"><strong class="reader-title-main">${frame ? Domain.escapeHtml(`${frame.chapterTitle} · ${frame.sceneTitle}`) : 'Кадр не выбран'}</strong><span class="reader-title-meta">${frame ? Domain.escapeHtml(`${frame.fragmentId} · ${Domain.textTypeLabel(frame.type)}`) : ''}</span></div><button data-reader-action="settings" class="button secondary reader-mobile-icon" aria-label="Инструменты чтения">•••</button></header><div id="readerScroll" class="reader-scroll">${readerCurrentHtml()}</div><footer class="reader-bottom reader-bottom-desktop"><button data-reader-action="first" class="button secondary">Первая</button><button data-reader-action="back" class="button secondary">← Назад</button><button data-reader-action="forward" class="button primary">Вперёд →</button><button data-reader-action="last" class="button secondary">Последняя</button></footer><footer class="reader-bottom reader-bottom-mobile"><button data-reader-action="back" class="button secondary">← Назад</button><button data-reader-action="forward" class="button primary">Вперёд →</button></footer></section><aside class="reader-inspector"><div class="inspector-tabs"><button class="inspector-tab ${state.inspectorTab === 'frame' ? 'active' : ''}" data-inspector-tab="frame">Кадр</button><button class="inspector-tab ${state.inspectorTab === 'image' ? 'active' : ''}" data-inspector-tab="image">Изображение</button><button class="inspector-tab ${state.inspectorTab === 'reviews' ? 'active' : ''}" data-inspector-tab="reviews">Замечания</button></div><div id="inspectorBody" class="inspector-body">${readerInspectorHtml(frame)}</div></aside><div id="readerDrawerBackdrop" class="reader-drawer-backdrop" aria-hidden="true"></div><section id="readerMobileSheet" class="reader-mobile-sheet" aria-hidden="true"><header class="reader-sheet-head"><h2 id="readerSheetTitle"></h2><button id="readerSheetClose" class="icon-button" aria-label="Закрыть">×</button></header><div id="readerSheetBody" class="reader-sheet-body"></div><footer id="readerSheetFooter" class="reader-sheet-footer"></footer></section></div></section>`
   await hydrateImages(view);
   wireReader(frame);
+  applyReaderPreferences();
   requestAnimationFrame(() => $('readerScroll')?.scrollTo({ top: 0, left: 0, behavior: 'auto' }));
 }
 
@@ -660,10 +686,6 @@ function wireReader(frame) {
     const query = event.target.value.toLowerCase();
     view.querySelectorAll('[data-scene-id]').forEach(button => button.classList.toggle('hidden', !button.textContent.toLowerCase().includes(query)));
   };
-  if ($('toggleScenes')) $('toggleScenes').onclick = () => { view.querySelector('.reader-sidebar')?.classList.toggle('open'); view.querySelector('.reader-inspector')?.classList.remove('open'); closeReaderSheet(); updateReaderBackdrop(); };
-  if ($('toggleInspector')) $('toggleInspector').onclick = () => { view.querySelector('.reader-inspector')?.classList.toggle('open'); view.querySelector('.reader-sidebar')?.classList.remove('open'); closeReaderSheet(); updateReaderBackdrop(); };
-  if ($('openPreviewTop')) $('openPreviewTop').onclick = () => setRoute('preview');
-  if ($('readerMore')) $('readerMore').onclick = openReaderTools;
   if ($('readerSheetClose')) $('readerSheetClose').onclick = closeReaderSheet;
   if ($('readerDrawerBackdrop')) $('readerDrawerBackdrop').onclick = closeReaderOverlays;
   view.querySelectorAll('[data-inspector-tab]').forEach(button => button.onclick = async () => { state.inspectorTab = button.dataset.inspectorTab; await refreshReaderContent({ resetScroll: false }); });
@@ -694,18 +716,9 @@ function wireReader(frame) {
     await persistWorkspaceSelection();
     await refreshReaderContent({ resetScroll: true });
   });
-  if ($('backFrame')) $('backFrame').onclick = async () => {
-    if (state.directFragmentId) return moveDirect(-1);
-    state.engine.back(); syncSelectedWithEngine(); await saveSession(); await persistWorkspaceSelection(); await refreshReaderContent({ resetScroll: true });
-  };
-  if ($('forwardFrame')) $('forwardFrame').onclick = async () => {
-    if (state.directFragmentId) return moveDirect(1);
-    const entry = state.engine.currentEntry();
-    if (entry?.kind === 'choice' && !entry.selectedOptionId) return toast('Сначала выберите действие');
-    await state.engine.forward(); syncSelectedWithEngine(); await saveSession(); await persistWorkspaceSelection(); await refreshReaderContent({ resetScroll: true });
-  };
-  if ($('firstFrame')) $('firstFrame').onclick = () => selectFragment(currentFrames()[0]?.fragmentId, { direct: true });
-  if ($('lastFrame')) $('lastFrame').onclick = () => selectFragment(currentFrames().at(-1)?.fragmentId, { direct: true });
+  const goBack = async () => { if (state.directFragmentId) return moveDirect(-1); state.engine.back(); syncSelectedWithEngine(); await saveSession(); await persistWorkspaceSelection(); await refreshReaderContent({ resetScroll: true }); };
+  const goForward = async () => { if (state.directFragmentId) return moveDirect(1); const entry = state.engine.currentEntry(); if (entry?.kind === 'choice' && !entry.selectedOptionId) return toast('Сначала выберите действие'); await state.engine.forward(); syncSelectedWithEngine(); await saveSession(); await persistWorkspaceSelection(); await refreshReaderContent({ resetScroll: true }); };
+  view.querySelectorAll('[data-reader-action]').forEach(button => button.onclick = async () => { const action = button.dataset.readerAction; if (action === 'scenes') { view.querySelector('.reader-sidebar')?.classList.toggle('open'); view.querySelector('.reader-inspector')?.classList.remove('open'); closeReaderSheet(); updateReaderBackdrop(); } else if (action === 'inspector') { view.querySelector('.reader-inspector')?.classList.toggle('open'); view.querySelector('.reader-sidebar')?.classList.remove('open'); closeReaderSheet(); updateReaderBackdrop(); } else if (action === 'preview') await setRoute('preview'); else if (action === 'settings') openReaderTools(); else if (action === 'focus') { state.readerFocus = !state.readerFocus; persistReaderPrefs(); applyReaderPreferences(); } else if (action === 'first') await selectFragment(currentFrames()[0]?.fragmentId, { direct: true }); else if (action === 'last') await selectFragment(currentFrames().at(-1)?.fragmentId, { direct: true }); else if (action === 'back') await goBack(); else if (action === 'forward') await goForward(); });
   if (!frame) return;
   $('saveFrameText')?.addEventListener('click', () => changeText(frame.fragmentId, $('frameTextEditor').value));
   $('restoreFrameText')?.addEventListener('click', () => changeText(frame.fragmentId, frame.originalText));
@@ -778,7 +791,7 @@ async function renderStoryboard() {
   if (!state.project) return renderNoProject('Сториборд');
   const scene = selectedScene() || currentContent().scenes[0];
   state.selectedSceneId = scene.id;
-  const frames = sceneFrames(scene).filter(frame => {
+  const allStoryboardFrames = sceneFrames(scene).filter(frame => {
     const assignment = currentAssignment(frame.fragmentId);
     if (state.storyboardFilter === 'missing') return !assignment?.assetId;
     if (state.storyboardFilter === 'needs-review') return assignment?.status === 'needs-review';
@@ -786,19 +799,21 @@ async function renderStoryboard() {
     if (state.storyboardFilter === 'reviews') return currentReviews(frame.fragmentId).length > 0;
     return true;
   });
+  const frames = allStoryboardFrames.slice(0, state.storyboardLimit);
   view.className = 'view';
   view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">СТОРИБОРД</span><h1>${Domain.escapeHtml(scene.chapterTitle)} · ${Domain.escapeHtml(scene.title)}</h1><p>Визуальная последовательность кадр за кадром.</p></div><div class="header-actions"><button id="batchAssets" class="button secondary">Загрузить изображения</button><button id="approveSelectedFrames" class="button secondary">Утвердить выбранные</button><button id="nextMissing" class="button primary">Следующий без изображения</button></div></header>
-    <div class="storyboard-toolbar"><select id="storyboardScene" class="select">${currentContent().scenes.map(item => `<option value="${Domain.escapeHtml(item.id)}" ${item.id === scene.id ? 'selected' : ''}>${Domain.escapeHtml(`${item.chapterTitle} · ${item.id} · ${item.title}`)}</option>`).join('')}</select><select id="storyboardFilter" class="select"><option value="all">Все кадры</option><option value="missing">Без изображения</option><option value="needs-review">Требуют проверки</option><option value="approved">Утверждённые</option><option value="reviews">С замечаниями</option></select><span class="status-badge">${frames.length} ${Domain.plural(frames.length, 'кадр', 'кадра', 'кадров')}</span></div>
+    <div class="storyboard-toolbar"><select id="storyboardScene" class="select">${currentContent().scenes.map(item => `<option value="${Domain.escapeHtml(item.id)}" ${item.id === scene.id ? 'selected' : ''}>${Domain.escapeHtml(`${item.chapterTitle} · ${item.id} · ${item.title}`)}</option>`).join('')}</select><select id="storyboardFilter" class="select"><option value="all">Все кадры</option><option value="missing">Без изображения</option><option value="needs-review">Требуют проверки</option><option value="approved">Утверждённые</option><option value="reviews">С замечаниями</option></select><span class="status-badge">${allStoryboardFrames.length} ${Domain.plural(allStoryboardFrames.length, 'кадр', 'кадра', 'кадров')}</span></div>
     <div class="storyboard-grid">${frames.map((fragment, index) => {
       const ref = Domain.getFrameRef(currentContent(), fragment.fragmentId);
       const assignment = currentAssignment(fragment.fragmentId);
       const asset = assignment?.assetId ? state.assetMap.get(assignment.assetId) : null;
       const text = Domain.effectiveText(ref.step, state.workspace);
       return `<article class="card frame-card" data-frame-card="${Domain.escapeHtml(fragment.fragmentId)}"><div class="frame-thumb">${asset ? `<img data-asset-src="${Domain.escapeHtml(asset.assetId)}" data-thumbnail="true" alt="">` : '<div class="visual-placeholder"><strong>Нет изображения</strong></div>'}</div><div class="frame-card-copy"><h3><span><input type="checkbox" data-select-frame="${fragment.fragmentId}" ${state.storyboardSelection.has(fragment.fragmentId) ? 'checked' : ''} aria-label="Выбрать кадр"> ${Domain.escapeHtml(ref.step.speaker || Domain.textTypeLabel(ref.step.type))}</span><small>${index + 1}/${frames.length}</small></h3><div class="frame-card-text">${Domain.escapeHtml(text)}</div><div class="frame-card-meta"><span class="status-badge ${assignment?.status || 'missing'}">${Domain.statusLabel(assignment?.status || 'missing')}</span>${currentReviews(fragment.fragmentId).length ? `<span class="status-badge needs-review">${currentReviews(fragment.fragmentId).length} замеч.</span>` : ''}</div></div><div class="frame-card-actions"><button class="button secondary small" data-card-reader="${fragment.fragmentId}">Читать</button><button class="button secondary small" data-card-preview="${fragment.fragmentId}">Превью</button><button class="button primary small" data-card-image="${fragment.fragmentId}">${asset ? 'Заменить' : 'Изображение'}</button></div></article>`;
-    }).join('')}</div>${frames.length ? '' : '<div class="empty-state"><div><h2>Кадры не найдены</h2><p>Измените фильтр.</p></div></div>'}</section>`;
+    }).join('')}</div>${frames.length ? '' : '<div class="empty-state"><div><h2>Кадры не найдены</h2><p>Измените фильтр.</p></div></div>'}${allStoryboardFrames.length > frames.length ? '<div class="load-more-wrap"><button id="storyboardLoadMore" class="button secondary">Показать ещё</button></div>' : ''}</section>`;
   $('storyboardFilter').value = state.storyboardFilter;
-  $('storyboardFilter').onchange = () => { state.storyboardFilter = $('storyboardFilter').value; renderStoryboard(); };
-  $('storyboardScene').onchange = () => { state.selectedSceneId = $('storyboardScene').value; renderStoryboard(); };
+  $('storyboardFilter').onchange = () => { state.storyboardFilter = $('storyboardFilter').value; state.storyboardLimit = 60; renderStoryboard(); };
+  $('storyboardScene').onchange = () => { state.selectedSceneId = $('storyboardScene').value; state.storyboardLimit = 60; renderStoryboard(); };
+  $('storyboardLoadMore')?.addEventListener('click', () => { state.storyboardLimit += 60; renderStoryboard(); });
   $('batchAssets').onclick = () => { $('assetInput').dataset.mode = 'batch-storyboard'; $('assetInput').value = ''; $('assetInput').click(); };
   $('approveSelectedFrames').onclick = async () => {
     const ids = [...state.storyboardSelection];
@@ -833,13 +848,15 @@ async function renderStoryboard() {
 async function renderAssets() {
   if (!state.project) return renderNoProject('Изображения');
   const query = state.assetSearch.toLowerCase();
-  const assets = state.assets.filter(asset => !query || `${asset.name} ${asset.assetId}`.toLowerCase().includes(query));
+  const allAssets = state.assets.filter(asset => !query || `${asset.name} ${asset.assetId}`.toLowerCase().includes(query));
+  const assets = allAssets.slice(0, state.assetLimit);
   const usageMap = new Map();
   for (const assignment of state.assignments) if (assignment.assetId) usageMap.set(assignment.assetId, (usageMap.get(assignment.assetId) || 0) + 1);
   view.className = 'view';
-  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">ASSET LIBRARY</span><h1>Изображения проекта</h1><p>Оригиналы хранятся как Blob в IndexedDB; кадры используют независимые VisualAssignment.</p></div><div class="header-actions"><button id="uploadAssets" class="button primary">Загрузить изображения</button></div></header><div class="filters"><input id="assetSearch" class="input" style="max-width:420px" placeholder="Название или Asset ID" value="${Domain.escapeHtml(state.assetSearch)}"><span class="status-badge">${assets.length} файлов</span></div><div class="asset-grid">${assets.map(asset => `<article class="card asset-card"><div class="asset-thumb"><img data-asset-src="${Domain.escapeHtml(asset.assetId)}" data-thumbnail="true" alt=""></div><div class="asset-copy"><strong title="${Domain.escapeHtml(asset.name)}">${Domain.escapeHtml(asset.name)}</strong><small>${asset.width}×${asset.height} · ${Math.round(asset.fileSize / 1024)} КБ · используется: ${usageMap.get(asset.assetId) || 0}</small></div><div class="asset-actions"><button class="button primary small" data-assign-asset="${asset.assetId}">Назначить кадру</button><button class="button secondary small" data-delete-asset="${asset.assetId}">Удалить</button></div></article>`).join('')}</div>${assets.length ? '' : '<div class="empty-state"><div><h2>Изображений нет</h2><p>Загрузите PNG, JPEG, WebP или AVIF.</p></div></div>'}</section>`;
+  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">ASSET LIBRARY</span><h1>Изображения проекта</h1><p>Оригиналы хранятся как Blob в IndexedDB; кадры используют независимые VisualAssignment.</p></div><div class="header-actions"><button id="uploadAssets" class="button primary">Загрузить изображения</button></div></header><div class="filters"><input id="assetSearch" class="input" style="max-width:420px" placeholder="Название или Asset ID" value="${Domain.escapeHtml(state.assetSearch)}"><span class="status-badge">${allAssets.length} файлов</span></div><div class="asset-grid">${assets.map(asset => `<article class="card asset-card"><div class="asset-thumb"><img data-asset-src="${Domain.escapeHtml(asset.assetId)}" data-thumbnail="true" alt=""></div><div class="asset-copy"><strong title="${Domain.escapeHtml(asset.name)}">${Domain.escapeHtml(asset.name)}</strong><small>${asset.width}×${asset.height} · ${Math.round(asset.fileSize / 1024)} КБ · используется: ${usageMap.get(asset.assetId) || 0}</small></div><div class="asset-actions"><button class="button primary small" data-assign-asset="${asset.assetId}">Назначить кадру</button><button class="button secondary small" data-delete-asset="${asset.assetId}">Удалить</button></div></article>`).join('')}</div>${assets.length ? '' : '<div class="empty-state"><div><h2>Изображений нет</h2><p>Загрузите PNG, JPEG, WebP или AVIF.</p></div></div>'}${allAssets.length > assets.length ? '<div class="load-more-wrap"><button id="assetsLoadMore" class="button secondary">Показать ещё</button></div>' : ''}</section>`;
   $('uploadAssets').onclick = () => { $('assetInput').dataset.mode = 'library'; $('assetInput').value = ''; $('assetInput').click(); };
-  $('assetSearch').oninput = event => { state.assetSearch = event.target.value; renderAssets(); };
+  $('assetSearch').oninput = event => { state.assetSearch = event.target.value; state.assetLimit = 80; renderAssets(); };
+  $('assetsLoadMore')?.addEventListener('click', () => { state.assetLimit += 80; renderAssets(); });
   view.querySelectorAll('[data-assign-asset]').forEach(button => button.onclick = async () => {
     if (!state.selectedFragmentId) return toast('Сначала выберите кадр в Reader или Storyboard');
     const before = currentAssignment();
@@ -942,26 +959,32 @@ async function movePreview(delta) {
 
 async function renderReviews() {
   if (!state.project) return renderNoProject('Замечания');
+  const query = state.reviewSearch.trim().toLowerCase();
   const reviews = state.reviews.filter(review => {
-    if (state.reviewFilter === 'open') return !Domain.CLOSED_REVIEW_STATUSES.has(review.status);
-    if (state.reviewFilter === 'text') return review.targetType === 'text';
-    if (state.reviewFilter === 'image') return review.targetType === 'image';
-    if (state.reviewFilter === 'critical') return review.severity === 'critical' && !Domain.CLOSED_REVIEW_STATUSES.has(review.status);
+    if (state.reviewFilter === 'open' && Domain.CLOSED_REVIEW_STATUSES.has(review.status)) return false;
+    if (state.reviewFilter === 'text' && review.targetType !== 'text') return false;
+    if (state.reviewFilter === 'image' && review.targetType !== 'image') return false;
+    if (state.reviewFilter === 'critical' && !(review.severity === 'critical' && !Domain.CLOSED_REVIEW_STATUSES.has(review.status))) return false;
+    if (query && !`${review.comment || ''} ${review.category || ''} ${review.fragmentId || ''} ${review.quotedText || ''}`.toLowerCase().includes(query)) return false;
     return true;
-  }).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-  view.className = 'view';
-  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">REVIEW QUEUE</span><h1>Замечания</h1><p>Текстовая, визуальная и композиционная вычитка.</p></div><button id="gptFromReviews" class="button primary">Подготовить для GPT</button></header><div class="filters"><select id="reviewFilter" class="select" style="max-width:240px"><option value="open">Открытые</option><option value="all">Все</option><option value="text">Текст</option><option value="image">Изображения</option><option value="critical">Критичные</option></select><span class="status-badge">${reviews.length}</span></div><div class="review-list">${reviews.map(review => `<article class="card pad"><div class="review-card-head"><div><span class="kicker">${Domain.escapeHtml(review.targetType)}</span><strong>${Domain.escapeHtml(review.category)}</strong></div><span class="status-badge ${review.severity === 'critical' ? 'missing' : 'draft'}">${Domain.escapeHtml(review.status)}</span></div><p>${Domain.escapeHtml(review.comment)}</p>${review.quotedText ? `<blockquote>${Domain.escapeHtml(review.quotedText)}</blockquote>` : ''}<div class="inline-actions"><select class="select" style="max-width:210px" data-review-status="${review.reviewId}">${Domain.REVIEW_STATUSES.map(status => `<option ${status === review.status ? 'selected' : ''}>${status}</option>`).join('')}</select><button class="button secondary small" data-review-jump="${review.fragmentId}">Открыть кадр</button></div></article>`).join('')}</div>${reviews.length ? '' : '<div class="empty-state"><div><h2>Замечаний нет</h2><p>Открытые задачи появятся здесь.</p></div></div>'}</section>`;
-  $('reviewFilter').value = state.reviewFilter;
-  $('reviewFilter').onchange = () => { state.reviewFilter = $('reviewFilter').value; renderReviews(); };
-  $('gptFromReviews').onclick = exportGptRequest;
-  view.querySelectorAll('[data-review-status]').forEach(select => select.onchange = () => updateReviewStatus(select.dataset.reviewStatus, select.value));
-  view.querySelectorAll('[data-review-jump]').forEach(button => button.onclick = () => selectFragment(button.dataset.reviewJump, { route: 'reader', direct: true }));
+  }).sort((a,b)=>(b.updatedAt||'').localeCompare(a.updatedAt||''));
+  const groupKey = review => { if (state.reviewGroup === 'type') return review.targetType || 'Другое'; if (state.reviewGroup === 'status') return review.status || 'Без статуса'; const ref=Domain.getFrameRef(currentContent(),review.fragmentId); return ref ? `${ref.scene.chapterTitle} · ${ref.scene.title}` : 'Без сцены'; };
+  const groups=new Map(); for (const review of reviews){const key=groupKey(review); if(!groups.has(key)) groups.set(key,[]); groups.get(key).push(review);} 
+  const card=review=>`<article class="card pad review-queue-card"><div class="review-card-head"><div><label class="review-select"><input type="checkbox" data-review-select="${review.reviewId}" ${state.reviewSelected.has(review.reviewId)?'checked':''}><span class="kicker">${Domain.escapeHtml(review.targetType)}</span></label><strong>${Domain.escapeHtml(review.category)}</strong></div><span class="status-badge ${review.severity==='critical'?'missing':'draft'}">${Domain.escapeHtml(review.status)}</span></div><p>${Domain.escapeHtml(review.comment)}</p>${review.quotedText?`<blockquote>${Domain.escapeHtml(review.quotedText)}</blockquote>`:''}<div class="inline-actions"><select class="select" style="max-width:210px" data-review-status="${review.reviewId}">${Domain.REVIEW_STATUSES.map(status=>`<option ${status===review.status?'selected':''}>${status}</option>`).join('')}</select><button class="button secondary small" data-review-jump="${review.fragmentId}">Открыть кадр</button></div></article>`;
+  view.className='view';
+  view.innerHTML=`<section class="page"><header class="page-header"><div><span class="kicker">REVIEW QUEUE</span><h1>Замечания</h1><p>Текстовая, визуальная и композиционная вычитка.</p></div><button id="gptFromReviews" class="button primary">Подготовить для GPT</button></header><div class="review-toolbar"><input id="reviewSearch" class="input" placeholder="Поиск по замечаниям, сценам и Fragment ID" value="${Domain.escapeHtml(state.reviewSearch)}"><select id="reviewFilter" class="select"><option value="open">Открытые</option><option value="all">Все</option><option value="text">Текст</option><option value="image">Изображения</option><option value="critical">Критичные</option></select><select id="reviewGroup" class="select"><option value="scene">По сценам</option><option value="type">По типу</option><option value="status">По статусу</option></select><span class="status-badge">${reviews.length}</span></div><div class="bulk-review-bar"><span>${state.reviewSelected.size} выбрано</span><select id="bulkReviewStatus" class="select">${Domain.REVIEW_STATUSES.map(status=>`<option>${status}</option>`).join('')}</select><button id="applyBulkReview" class="button secondary">Применить статус</button></div><div class="review-list grouped-review-list">${[...groups].map(([group,items])=>`<section class="review-group"><header><strong>${Domain.escapeHtml(group)}</strong><span>${items.length}</span></header>${items.map(card).join('')}</section>`).join('')}</div>${reviews.length?'':'<div class="empty-state"><div><h2>Замечаний нет</h2><p>Открытые задачи появятся здесь.</p></div></div>'}</section>`;
+  $('reviewFilter').value=state.reviewFilter; $('reviewGroup').value=state.reviewGroup;
+  $('reviewFilter').onchange=()=>{state.reviewFilter=$('reviewFilter').value;renderReviews();}; $('reviewGroup').onchange=()=>{state.reviewGroup=$('reviewGroup').value;renderReviews();};
+  $('reviewSearch').oninput=event=>{state.reviewSearch=event.target.value;clearTimeout(state.reviewSearchTimer);state.reviewSearchTimer=setTimeout(renderReviews,180);}; $('gptFromReviews').onclick=exportGptRequest;
+  view.querySelectorAll('[data-review-select]').forEach(input=>input.onchange=()=>{input.checked?state.reviewSelected.add(input.dataset.reviewSelect):state.reviewSelected.delete(input.dataset.reviewSelect);renderReviews();});
+  $('applyBulkReview').onclick=async()=>{const status=$('bulkReviewStatus').value;for(const id of [...state.reviewSelected])await updateReviewStatus(id,status,{rerender:false});state.reviewSelected.clear();await refreshProjectData();renderReviews();};
+  view.querySelectorAll('[data-review-status]').forEach(select=>select.onchange=()=>updateReviewStatus(select.dataset.reviewStatus,select.value)); view.querySelectorAll('[data-review-jump]').forEach(button=>button.onclick=()=>selectFragment(button.dataset.reviewJump,{route:'reader',direct:true}));
 }
 
 async function renderVersions() {
   if (!state.project) return renderNoProject('Версии');
   view.className = 'view';
-  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">VERSION CONTROL</span><h1>Версии сценария</h1><p>Текст и визуальный manifest сохраняются как единый snapshot.</p></div><button id="createVersion" class="button primary">Создать версию</button></header><div class="version-list">${state.versions.map(version => `<article class="card version-card"><div class="version-card-head"><div><span class="kicker">${version.versionId === state.version.versionId ? 'ТЕКУЩАЯ' : 'ВЕРСИЯ'}</span><h3>${Domain.escapeHtml(version.label)}</h3><p class="muted">${Domain.formatDate(version.createdAt)}${version.parentVersionId ? ` · parent: ${Domain.escapeHtml(version.parentVersionId)}` : ''}</p></div><div class="inline-actions"><button class="button secondary small" data-open-version="${version.versionId}" ${version.versionId === state.version.versionId ? 'disabled' : ''}>Открыть</button><button class="button secondary small" data-diff-version="${version.versionId}">Diff</button></div></div></article>`).join('')}</div></section>`;
+  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">VERSION CONTROL</span><h1>Версии сценария</h1><p>Текст и визуальный manifest сохраняются как единый snapshot.</p></div><button id="createVersion" class="button primary">Создать версию</button></header><div class="version-list">${state.versions.map(version => `<article class="card version-card"><div class="version-card-head"><div><span class="kicker">${version.versionId === state.version.versionId ? 'ТЕКУЩАЯ' : 'ВЕРСИЯ'}</span><h3>${Domain.escapeHtml(version.label)}</h3><p class="muted">${Domain.formatDate(version.createdAt)}${version.parentVersionId ? ` · parent: ${Domain.escapeHtml(version.parentVersionId)}` : ''}</p>${version.note ? `<p>${Domain.escapeHtml(version.note)}</p>` : ''}</div><div class="inline-actions"><button class="button secondary small" data-open-version="${version.versionId}" ${version.versionId === state.version.versionId ? 'disabled' : ''}>Открыть</button><button class="button secondary small" data-diff-version="${version.versionId}">Diff</button></div></div></article>`).join('')}</div></section>`;
   $('createVersion').onclick = createVersion;
   view.querySelectorAll('[data-open-version]').forEach(button => button.onclick = () => switchVersion(button.dataset.openVersion));
   view.querySelectorAll('[data-diff-version]').forEach(button => button.onclick = () => showVersionDiff(button.dataset.diffVersion));
@@ -970,10 +993,11 @@ async function renderVersions() {
 async function createVersion() {
   const label = prompt('Название новой версии', `Редакция ${new Date().toLocaleDateString('ru-RU')}`);
   if (!label) return;
+  const note = prompt('Кратко: что изменилось в этой версии?', '') || '';
   const content = Domain.applyTextEditsToContent(currentContent(), state.workspace.textEdits || {});
   const versionId = `${state.project.projectId}::${Domain.slug(label)}-${Date.now().toString(36)}`;
   const validation = parser.validateNovel(content);
-  const version = { versionId, projectId: state.project.projectId, label, parentVersionId: state.version.versionId, sourceType: 'editor-v3', createdAt: Domain.now(), updatedAt: Domain.now(), content, validation: { ok: validation.ok, errors: validation.errors, warnings: validation.warnings, stats: validation.stats } };
+  const version = { versionId, projectId: state.project.projectId, label, parentVersionId: state.version.versionId, sourceType: 'editor-v3', note, createdAt: Domain.now(), updatedAt: Domain.now(), content, validation: { ok: validation.ok, errors: validation.errors, warnings: validation.warnings, stats: validation.stats } };
   await DB.put('versions', version);
   await DB.cloneVisualScope(state.project.projectId, workspaceScope(), DB.versionScope(versionId));
   state.project.activeVersionId = versionId;
@@ -1005,27 +1029,12 @@ async function switchVersion(versionId) {
 }
 
 async function showVersionDiff(versionId) {
-  const version = await DB.get('versions', versionId);
-  if (!version) return;
-  const parent = version.parentVersionId ? await DB.get('versions', version.parentVersionId) : null;
-  if (!parent) return toast('Для первой версии нет parent Diff');
-  const beforeMap = new Map(Domain.flattenFrames(parent.content).map(frame => [frame.fragmentId, frame]));
-  const changes = [];
-  for (const frame of Domain.flattenFrames(version.content)) {
-    const before = beforeMap.get(frame.fragmentId);
-    if (before && before.text !== frame.text) changes.push({ fragmentId: frame.fragmentId, before: before.text, after: frame.text });
-  }
-  const [beforeVisuals, afterVisuals] = await Promise.all([
-    DB.getAllByIndex('visualAssignments', 'scopeId', DB.versionScope(parent.versionId)),
-    DB.getAllByIndex('visualAssignments', 'scopeId', DB.versionScope(version.versionId))
-  ]);
-  const beforeVisualMap = new Map(beforeVisuals.map(item => [item.fragmentId, item]));
-  const visualChanges = afterVisuals.filter(item => {
-    const before = beforeVisualMap.get(item.fragmentId);
-    return before && (before.assetId !== item.assetId || JSON.stringify(before.focalPoint) !== JSON.stringify(item.focalPoint) || before.zoom !== item.zoom);
-  });
-  openModal({ kicker: 'VERSION DIFF', title: `${parent.label} → ${version.label}`, body: `<p class="muted">Текстовых изменений: ${changes.length} · визуальных: ${visualChanges.length}</p>${changes.slice(0, 50).map(change => `<div class="diff-grid"><div class="diff-pane before"><span>Было · ${change.fragmentId}</span>${Domain.escapeHtml(change.before)}</div><div class="diff-pane after"><span>Стало</span>${Domain.escapeHtml(change.after)}</div></div>`).join('') || '<div class="empty-state"><p>Текстовых изменений нет.</p></div>'}${visualChanges.length ? `<h3>Визуальные изменения</h3>${visualChanges.slice(0, 50).map(item => `<p><strong>${item.fragmentId}</strong>: ${beforeVisualMap.get(item.fragmentId)?.assetId || 'нет'} → ${item.assetId || 'нет'}</p>`).join('')}` : ''}`, footer: '<button id="closeDiff" class="button primary">Готово</button>' });
-  $('closeDiff').onclick = closeModal;
+  const version=await DB.get('versions',versionId); if(!version)return; const parent=version.parentVersionId?await DB.get('versions',version.parentVersionId):null; if(!parent)return toast('Для первой версии нет parent Diff');
+  const beforeMap=new Map(Domain.flattenFrames(parent.content).map(frame=>[frame.fragmentId,frame])); const afterMap=new Map(Domain.flattenFrames(version.content).map(frame=>[frame.fragmentId,frame]));
+  const [beforeVisuals,afterVisuals]=await Promise.all([DB.getAllByIndex('visualAssignments','scopeId',DB.versionScope(parent.versionId)),DB.getAllByIndex('visualAssignments','scopeId',DB.versionScope(version.versionId))]); const bv=new Map(beforeVisuals.map(item=>[item.fragmentId,item])); const av=new Map(afterVisuals.map(item=>[item.fragmentId,item]));
+  const ids=new Set([...beforeMap.keys(),...afterMap.keys(),...bv.keys(),...av.keys()]); const changes=[...ids].map(id=>({id,before:beforeMap.get(id),after:afterMap.get(id),beforeVisual:bv.get(id),afterVisual:av.get(id)})).filter(item=>{const t=(item.before?.text||'')!==(item.after?.text||'');const v=JSON.stringify({a:item.beforeVisual?.assetId,f:item.beforeVisual?.focalPoint,z:item.beforeVisual?.zoom,s:item.beforeVisual?.status})!==JSON.stringify({a:item.afterVisual?.assetId,f:item.afterVisual?.focalPoint,z:item.afterVisual?.zoom,s:item.afterVisual?.status});return t||v;});
+  const body=changes.slice(0,100).map(item=>`<article class="version-diff-card card pad"><header><strong>${Domain.escapeHtml(item.id)}</strong></header><div class="version-diff-visuals"><div><span>Было</span>${item.beforeVisual?.assetId?`<div class="diff-thumb"><img data-asset-src="${Domain.escapeHtml(item.beforeVisual.assetId)}" data-thumbnail="true" alt=""></div>`:'<div class="diff-thumb empty">Нет изображения</div>'}</div><div><span>Стало</span>${item.afterVisual?.assetId?`<div class="diff-thumb"><img data-asset-src="${Domain.escapeHtml(item.afterVisual.assetId)}" data-thumbnail="true" alt=""></div>`:'<div class="diff-thumb empty">Нет изображения</div>'}</div></div><div class="diff-grid"><div class="diff-pane before"><span>Было</span>${Domain.escapeHtml(item.before?.text||'')}</div><div class="diff-pane after"><span>Стало</span>${Domain.escapeHtml(item.after?.text||'')}</div></div><div class="diff-meta">asset: ${Domain.escapeHtml(item.beforeVisual?.assetId||'нет')} → ${Domain.escapeHtml(item.afterVisual?.assetId||'нет')} · zoom: ${item.beforeVisual?.zoom||1} → ${item.afterVisual?.zoom||1} · status: ${item.beforeVisual?.status||'—'} → ${item.afterVisual?.status||'—'}</div></article>`).join('');
+  openModal({kicker:'VERSION DIFF',title:`${parent.label} → ${version.label}`,body:`<p class="muted">Изменённых кадров: ${changes.length}</p>${body||'<div class="empty-state"><p>Изменений нет.</p></div>'}`,footer:'<button id="closeDiff" class="button primary">Готово</button>'}); await hydrateImages($('modalBody')); $('closeDiff').onclick=closeModal;
 }
 
 async function renderGpt() {
@@ -1052,25 +1061,11 @@ async function exportGptRequest() {
 }
 
 async function showCandidate(candidateId) {
-  const candidate = await DB.get('gptCandidates', candidateId);
-  if (!candidate) return;
-  openModal({ kicker: 'GPT DIFF', title: 'Проверка исправлений', body: `<div id="candidateChanges">${(candidate.changes || []).map((change, index) => `<article class="card pad" style="margin-bottom:12px"><div class="diff-grid"><div class="diff-pane before"><span>Было · ${Domain.escapeHtml(change.fragmentId)}</span>${Domain.escapeHtml(change.originalText || '')}</div><div class="diff-pane after"><span>Предложение</span>${Domain.escapeHtml(change.revisedText || '')}</div></div><p class="muted">${Domain.escapeHtml(change.reason || '')}</p><div class="inline-actions"><button class="button primary small" data-accept-change="${index}">Принять</button><button class="button secondary small" data-reject-change="${index}">Отклонить</button></div></article>`).join('')}</div>`, footer: '<button id="candidateDone" class="button primary">Готово</button>' });
-  $('candidateDone').onclick = closeModal;
-  $('candidateChanges').querySelectorAll('[data-accept-change]').forEach(button => button.onclick = async () => {
-    const change = candidate.changes[Number(button.dataset.acceptChange)];
-    await changeText(change.fragmentId, change.revisedText);
-    change.decision = 'accepted';
-    for (const reviewId of change.reviewIds || []) await updateReviewStatus(reviewId, 'Требует проверки');
-    await DB.put('gptCandidates', { ...candidate, updatedAt: Domain.now() });
-    button.closest('article').style.opacity = '.55';
-    toast('Исправление принято в workspace');
-  });
-  $('candidateChanges').querySelectorAll('[data-reject-change]').forEach(button => button.onclick = async () => {
-    const change = candidate.changes[Number(button.dataset.rejectChange)];
-    change.decision = 'rejected';
-    await DB.put('gptCandidates', { ...candidate, updatedAt: Domain.now() });
-    button.closest('article').style.opacity = '.55';
-  });
+  const candidate=await DB.get('gptCandidates',candidateId); if(!candidate)return; const frames=currentFrames(); const frameIndex=new Map(frames.map((frame,index)=>[frame.fragmentId,index]));
+  const card=(change,index)=>{const ref=Domain.getFrameRef(currentContent(),change.fragmentId);const current=ref?Domain.effectiveText(ref.step,state.workspace):'';const conflict=change.originalText!=null&&current!==change.originalText&&current!==change.revisedText;const idx=frameIndex.get(change.fragmentId);const prev=idx>0?effectiveFrame(frames[idx-1].fragmentId)?.text:'';const next=idx!=null&&idx<frames.length-1?effectiveFrame(frames[idx+1].fragmentId)?.text:'';const assignment=currentAssignment(change.fragmentId);return `<article class="card pad gpt-change-card ${conflict?'has-conflict':''}" data-change-card="${index}"><div class="gpt-change-head"><strong>${Domain.escapeHtml(change.fragmentId)}</strong>${conflict?'<span class="status-badge missing">Конфликт версии</span>':'<span class="status-badge approved">Можно применить</span>'}</div><div class="gpt-context"><small>До: ${Domain.escapeHtml(prev||'—')}</small><small>После: ${Domain.escapeHtml(next||'—')}</small></div>${assignment?.assetId?`<div class="gpt-thumb"><img data-asset-src="${Domain.escapeHtml(assignment.assetId)}" data-thumbnail="true" alt=""></div>`:''}<div class="diff-grid"><div class="diff-pane before"><span>Текущий текст</span>${Domain.escapeHtml(current)}</div><div class="diff-pane after"><span>Предложение</span>${Domain.escapeHtml(change.revisedText||'')}</div></div><p class="muted">${Domain.escapeHtml(change.reason||'')}</p><div class="inline-actions"><button class="button primary small" data-accept-change="${index}" ${conflict?'disabled':''}>Принять</button><button class="button secondary small" data-reject-change="${index}">Отклонить</button>${conflict?`<button class="button secondary small" data-open-conflict="${change.fragmentId}">Открыть в Reader</button>`:''}</div></article>`;};
+  openModal({kicker:'GPT DIFF',title:'Проверка исправлений',body:`<div id="candidateChanges">${(candidate.changes||[]).map(card).join('')}</div>`,footer:'<button id="acceptAllSafe" class="button secondary">Принять все без конфликтов</button><button id="candidateDone" class="button primary">Готово</button>'}); await hydrateImages($('modalBody')); $('candidateDone').onclick=closeModal;
+  const acceptOne=async index=>{const change=candidate.changes[index];const ref=Domain.getFrameRef(currentContent(),change.fragmentId);if(!ref)return;const current=Domain.effectiveText(ref.step,state.workspace);if(change.originalText!=null&&current!==change.originalText&&current!==change.revisedText)return toast('Конфликт: текст изменён после отправки GPT',5000);await changeText(change.fragmentId,change.revisedText);change.decision='accepted';for(const reviewId of change.reviewIds||[])await updateReviewStatus(reviewId,'Требует проверки',{rerender:false});await DB.put('gptCandidates',{...candidate,updatedAt:Domain.now()});$('candidateChanges')?.querySelector(`[data-change-card="${index}"]`)?.classList.add('decision-done');};
+  $('candidateChanges').querySelectorAll('[data-accept-change]').forEach(button=>button.onclick=()=>acceptOne(Number(button.dataset.acceptChange))); $('candidateChanges').querySelectorAll('[data-reject-change]').forEach(button=>button.onclick=async()=>{const index=Number(button.dataset.rejectChange);candidate.changes[index].decision='rejected';await DB.put('gptCandidates',{...candidate,updatedAt:Domain.now()});button.closest('article').classList.add('decision-done');}); $('candidateChanges').querySelectorAll('[data-open-conflict]').forEach(button=>button.onclick=()=>{closeModal();selectFragment(button.dataset.openConflict,{route:'reader',direct:true});}); $('acceptAllSafe').onclick=async()=>{for(let i=0;i<(candidate.changes||[]).length;i++)if(!candidate.changes[i].decision)await acceptOne(i);toast('Все изменения без конфликтов обработаны');};
 }
 
 async function renderGraphRoute() {
@@ -1128,7 +1123,7 @@ async function renderGraphRoute() {
       onOpen: openNode
     });
     state.graphNavigation?.destroy?.();
-    state.graphNavigation = enableGraphNavigation($('graphViewport'), svg, { initial: state.graphView === 'metro' ? .9 : .8, onZoom: zoom => { if ($('graphZoomLabel')) $('graphZoomLabel').textContent = `${Math.round(zoom * 100)}%`; } });
+    state.graphNavigation = enableGraphNavigation($('graphViewport'), svg, { initial: state.graphView === 'metro' ? .9 : .8, onZoom: zoom => { if ($('graphZoomLabel')) $('graphZoomLabel').textContent = `${Math.round(zoom * 100)}%`; const vp=$('graphViewport'); vp?.classList.toggle('semantic-low',zoom<.48); vp?.classList.toggle('semantic-mid',zoom>=.48&&zoom<.78); vp?.classList.toggle('semantic-high',zoom>=.78); } });
     if (state.graphView === 'structure') {
       renderGraphOutline($('graphOutlineBody'), model, { currentSceneId: effectiveFrame()?.sceneId, onSelect: selectNode, onOpen: openNode });
       renderGraphMinimap($('graphMinimap'), svg);
@@ -1168,12 +1163,15 @@ function showGraphInspector(node, model = null) {
   $('graphPreview')?.addEventListener('click', () => { const first = sceneFrames(sceneById(node.sceneId))[0]; if (first) selectFragment(first.fragmentId, { route: 'preview', direct: true }); });
 }
 
+function productionPreflight() { const validation=parser.validateNovel(Domain.applyTextEditsToContent(currentContent(),state.workspace.textEdits||{}));const metrics=Domain.projectMetrics(currentContent(),state.workspace,state.assignments,state.reviews);const criticalReviews=state.reviews.filter(review=>review.severity==='critical'&&!Domain.CLOSED_REVIEW_STATUSES.has(review.status)).length;const blockers=[];if(!validation.ok)blockers.push(`${validation.errors?.length||1} ошибок структуры`);if(metrics.missing)blockers.push(`${metrics.missing} кадров без изображения`);if(metrics.needsReview)blockers.push(`${metrics.needsReview} визуалов требуют проверки`);if(criticalReviews)blockers.push(`${criticalReviews} критичных замечаний`);return{validation,metrics,criticalReviews,blockers,ready:blockers.length===0};}
+
 async function renderExport() {
   if (!state.project) return renderNoProject('Экспорт');
-  const metrics = Domain.projectMetrics(currentContent(), state.workspace, state.assignments, state.reviews);
+  const preflight = productionPreflight();
+  const metrics = preflight.metrics;
   const estimate = state.storage || await DB.storageEstimate();
   view.className = 'view';
-  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">IMPORT / EXPORT</span><h1>Пакеты проекта</h1><p>Master DOCX, полный Project ZIP и оптимизированный runtime build.</p></div></header><div class="metric-grid">${metricsHtml(metrics)}</div><div class="export-grid"><article class="card export-card"><h2>Project ZIP</h2><p>Полный проект: сценарий, версии, визуальный manifest, изображения, замечания и прогресс.</p><button id="exportProject" class="button primary">Скачать Project ZIP</button><button id="importProject" class="button secondary">Импортировать Project ZIP</button></article><article class="card export-card"><h2>Runtime build</h2><p>Только утверждённые тексты, изображения и интерактивная структура. Производственная сборка блокируется при missing visual.</p><button id="exportRuntime" class="button primary" ${metrics.missing ? 'disabled' : ''}>Собрать runtime</button>${metrics.missing ? `<span class="status-badge missing">Не назначено: ${metrics.missing}</span>` : '<span class="status-badge approved">Готово</span>'}<button id="exportDraftRuntime" class="button secondary">Черновой runtime с placeholders</button></article><article class="card export-card"><h2>Master DOCX</h2><p>Актуальный текст сценария с устойчивыми Fragment ID.</p><button id="exportDocx" class="button primary">Скачать DOCX</button><button id="exportJson" class="button secondary">Скачать HEARTLINE JSON</button></article><article class="card export-card"><h2>Отчёты</h2><p>CSV замечаний и проверка качества визуалов.</p><button id="exportReviews" class="button secondary">Замечания CSV</button><button id="exportQuality" class="button secondary">Quality report JSON</button></article><article class="card export-card"><h2>Локальное хранилище</h2><p>Использовано: ${estimate?.usage ? `${Math.round(estimate.usage / 1024 / 1024)} МБ` : 'н/д'} из ${estimate?.quota ? `${Math.round(estimate.quota / 1024 / 1024)} МБ` : 'н/д'}.</p><button id="persistStorage" class="button secondary">Запросить persistent storage</button></article></div></section>`;
+  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">IMPORT / EXPORT</span><h1>Пакеты проекта</h1><p>Master DOCX, полный Project ZIP и оптимизированный runtime build.</p></div></header><div class="metric-grid">${metricsHtml(metrics)}</div><article class="card pad preflight-card ${preflight.ready ? 'ready' : 'blocked'}"><div><span class="kicker">PRODUCTION PREFLIGHT</span><h2>${preflight.ready ? 'Готово к production build' : 'Нужно устранить блокеры'}</h2><p>${preflight.ready ? 'Структура валидна, обязательные визуалы утверждены, критичных замечаний нет.' : preflight.blockers.map(item => `• ${Domain.escapeHtml(item)}`).join('<br>')}</p></div><span class="status-badge ${preflight.ready ? 'approved' : 'missing'}">${preflight.ready ? 'READY' : 'BLOCKED'}</span></article><div class="export-grid"><article class="card export-card"><h2>Project ZIP</h2><p>Полный проект: сценарий, версии, визуальный manifest, изображения, замечания и прогресс.</p><button id="exportProject" class="button primary">Скачать Project ZIP</button><button id="importProject" class="button secondary">Импортировать Project ZIP</button></article><article class="card export-card"><h2>Runtime build</h2><p>Только утверждённые тексты, изображения и интерактивная структура. Производственная сборка блокируется при missing visual.</p><button id="exportRuntime" class="button primary" ${preflight.ready ? '' : 'disabled'}>Собрать runtime</button>${preflight.ready ? '<span class="status-badge approved">Готово</span>' : '<span class="status-badge missing">Preflight blocked</span>'}<button id="exportDraftRuntime" class="button secondary">Черновой runtime с placeholders</button></article><article class="card export-card"><h2>Master DOCX</h2><p>Актуальный текст сценария с устойчивыми Fragment ID.</p><button id="exportDocx" class="button primary">Скачать DOCX</button><button id="exportJson" class="button secondary">Скачать HEARTLINE JSON</button></article><article class="card export-card"><h2>Отчёты</h2><p>CSV замечаний и проверка качества визуалов.</p><button id="exportReviews" class="button secondary">Замечания CSV</button><button id="exportQuality" class="button secondary">Quality report JSON</button></article><article class="card export-card"><h2>Локальное хранилище</h2><p>Использовано: ${estimate?.usage ? `${Math.round(estimate.usage / 1024 / 1024)} МБ` : 'н/д'} из ${estimate?.quota ? `${Math.round(estimate.quota / 1024 / 1024)} МБ` : 'н/д'}.</p><button id="persistStorage" class="button secondary">Запросить persistent storage</button></article></div></section>`;
   $('exportProject').onclick = exportProjectZip;
   $('importProject').onclick = () => { $('projectImportInput').value = ''; $('projectImportInput').click(); };
   $('exportRuntime').onclick = () => exportRuntimeZip(false);
@@ -1197,7 +1195,7 @@ async function exportProjectZip() {
     { name: 'metadata.json', data: JSON.stringify(metadata, null, 2) },
     { name: 'visual-manifest.json', data: JSON.stringify(state.assignments, null, 2) },
     { name: 'reviews.json', data: JSON.stringify(state.reviews, null, 2) },
-    { name: 'README.txt', data: 'HEARTLINE Editor v3 Project ZIP. Импортируйте через Экспорт → Project ZIP.' }
+    { name: 'README.txt', data: 'HEARTLINE Editor 3.1 Project ZIP. Импортируйте через Экспорт → Project ZIP.' }
   ];
   for (const asset of state.assets) entries.push({ name: `assets/${asset.assetId}.${asset.mimeType.split('/')[1]?.replace('jpeg', 'jpg') || 'bin'}`, data: new Uint8Array(await asset.blob.arrayBuffer()) });
   exporter.downloadBytes(exporter.createZip(entries), `${Domain.slug(state.project.title)}_project_v3.zip`, 'application/zip');
@@ -1225,7 +1223,7 @@ async function exportRuntimeZip(draft) {
     entries.push({ name: `assets/${assetId}.${extension}`, data: new Uint8Array(await asset.blob.arrayBuffer()) });
   }
   const runtime = { schema: 'heartline-runtime-v3', title: state.project.title, versionId: state.version.versionId, builtAt: Domain.now(), draft, novel: content, visualManifest: manifest };
-  const [engineSource, domainSource, playerSource] = await Promise.all([fetch('./app-v300/engine.js').then(r => r.text()), fetch('./app-v300/domain.js').then(r => r.text()), fetch('./app-v300/player-renderer.js').then(r => r.text())]);
+  const [engineSource, domainSource, playerSource] = await Promise.all([fetch('./heartline-engine.js').then(r => r.text()), fetch('./heartline-domain.js').then(r => r.text()), fetch('./heartline-player-renderer.js').then(r => r.text())]);
   entries.push(
     { name: 'runtime.json', data: JSON.stringify(runtime) },
     { name: 'engine.js', data: engineSource },
@@ -1241,7 +1239,7 @@ async function exportRuntimeZip(draft) {
 
 function runtimeIndexHtml() { return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>HEARTLINE</title><link rel="stylesheet" href="runtime.css"></head><body><main id="player"></main><script type="module" src="runtime-player.js"></script></body></html>`; }
 function runtimeCss() { return `*{box-sizing:border-box}html,body,#player{margin:0;width:100%;height:100%;overflow:hidden;background:#111;font-family:Inter,Arial,sans-serif}.player-device.runtime-bare{position:relative;border:0;border-radius:0;background:#111;overflow:hidden}.player-screen{position:relative;width:100%;height:100%;overflow:hidden;background:#ddd}.player-image{position:absolute;inset:0;width:100%;height:100%;display:block}.player-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:40px;background:linear-gradient(145deg,#dddeda,#cfd1cc);color:#60625e;gap:9px}.player-placeholder-mark{width:52px;height:52px;border-radius:16px;background:#202020;color:white;display:grid;place-items:center;font-weight:800;font-size:22px}.player-placeholder span{max-width:250px;font-size:12px}.player-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15),transparent 26%,transparent 52%,rgba(0,0,0,.5) 100%);pointer-events:none}.player-scene-label{position:absolute;left:16px;right:16px;top:calc(var(--safe-top) + 10px);display:flex;justify-content:space-between;color:white;text-shadow:0 1px 8px rgba(0,0,0,.75);font-size:10px}.player-scene-label span{font-weight:850;letter-spacing:.12em}.player-scene-label strong{max-width:62%;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.player-dialogue-panel{position:absolute;left:12px;right:12px;bottom:calc(var(--safe-bottom) + 10px);border-radius:18px;padding:15px 16px 16px;background:rgba(255,255,255,calc(.76 + var(--overlay)));box-shadow:0 10px 30px rgba(0,0,0,.18);backdrop-filter:blur(18px);color:#171717}.player-dialogue-panel.thought .player-current-text,.player-dialogue-panel.narration .player-current-text{font-family:Georgia,"Times New Roman",serif;font-style:italic}.player-speaker{font-size:10px;font-weight:850;letter-spacing:.08em;margin-bottom:7px}.player-current-text{font-size:var(--frame-font);line-height:1.42;white-space:pre-wrap}.player-options{display:grid;gap:8px;margin-top:12px}.player-option{border:1px solid rgba(0,0,0,.15);background:rgba(255,255,255,.78);border-radius:11px;padding:10px 11px;text-align:left;font-size:calc(var(--frame-font) * .82)}.runtime-next{position:absolute;inset:0;border:0;background:transparent}`; }
-function runtimePlayerJs() { return `import {StoryEngine,createSession} from './heartline-v301-engine.js';\nimport {renderPlayerFrame} from './heartline-v301-player-renderer.js';\nconst data=await fetch('./runtime.json').then(r=>r.json());const host=document.getElementById('player');const session=createSession('runtime',data.versionId,data.novel);const engine=new StoryEngine(data.novel,session);engine.advance();function ref(id){for(const s of data.novel.scenes){const stack=[...(s.steps||[])];while(stack.length){const x=stack.shift();if(x.fragmentId===id)return{x,s};if(x.type==='choice')for(const o of x.options||[])stack.push(...(o.steps||[]));}}}function draw(){const e=engine.currentEntry();if(!e)return;const r=ref(e.fragmentId);if(!r)return;const st=r.x,m=data.visualManifest[e.fragmentId]||{},path=m.assetId?data.visualManifest.__assets?.[m.assetId]:null;const frame={fragmentId:e.fragmentId,sceneId:r.s.id,sceneTitle:r.s.title,type:st.type,speaker:st.speaker||'',text:st.type==='choice'?(st.prompt||''):(st.text||''),options:st.type==='choice'?(st.options||[]).map(o=>({id:o.id,label:o.label})):[],visualPrompt:r.s.title,assignment:m,asset:null};const device={id:'runtime',label:'Runtime',width:window.innerWidth,height:window.innerHeight,safeTop:Math.max(20,Number(getComputedStyle(document.documentElement).getPropertyValue('--sat')||0)),safeBottom:24,fontSize:Math.max(16,Math.min(20,window.innerWidth/22))};renderPlayerFrame(host,{frame,device,orientation:window.innerWidth>window.innerHeight?'landscape':'portrait',assetUrl:path,scaleToFit:false,bare:true,showStatusBar:false,onChoose:id=>{engine.choose(id);draw()}});if(st.type!=='choice'){const next=document.createElement('button');next.className='runtime-next';next.setAttribute('aria-label','Далее');next.onclick=()=>{engine.forward();draw()};host.querySelector('.player-screen').append(next)}}window.addEventListener('resize',draw);draw();`; }
+function runtimePlayerJs() { return `import {StoryEngine,createSession} from './engine.js';\nimport {renderPlayerFrame} from './player-renderer.js';\nconst data=await fetch('./runtime.json').then(r=>r.json());const host=document.getElementById('player');const session=createSession('runtime',data.versionId,data.novel);const engine=new StoryEngine(data.novel,session);engine.advance();function ref(id){for(const s of data.novel.scenes){const stack=[...(s.steps||[])];while(stack.length){const x=stack.shift();if(x.fragmentId===id)return{x,s};if(x.type==='choice')for(const o of x.options||[])stack.push(...(o.steps||[]));}}}function draw(){const e=engine.currentEntry();if(!e)return;const r=ref(e.fragmentId);if(!r)return;const st=r.x,m=data.visualManifest[e.fragmentId]||{},path=m.assetId?data.visualManifest.__assets?.[m.assetId]:null;const frame={fragmentId:e.fragmentId,sceneId:r.s.id,sceneTitle:r.s.title,type:st.type,speaker:st.speaker||'',text:st.type==='choice'?(st.prompt||''):(st.text||''),options:st.type==='choice'?(st.options||[]).map(o=>({id:o.id,label:o.label})):[],visualPrompt:r.s.title,assignment:m,asset:null};const device={id:'runtime',label:'Runtime',width:window.innerWidth,height:window.innerHeight,safeTop:Math.max(20,Number(getComputedStyle(document.documentElement).getPropertyValue('--sat')||0)),safeBottom:24,fontSize:Math.max(16,Math.min(20,window.innerWidth/22))};renderPlayerFrame(host,{frame,device,orientation:window.innerWidth>window.innerHeight?'landscape':'portrait',assetUrl:path,scaleToFit:false,bare:true,showStatusBar:false,onChoose:id=>{engine.choose(id);draw()}});if(st.type!=='choice'){const next=document.createElement('button');next.className='runtime-next';next.setAttribute('aria-label','Далее');next.onclick=()=>{engine.forward();draw()};host.querySelector('.player-screen').append(next)}}window.addEventListener('resize',draw);draw();`; }
 
 function exportReviewsCsv() {
   const rows = state.reviews.map(review => ({ reviewId: review.reviewId, targetType: review.targetType, fragmentId: review.fragmentId, category: review.category, severity: review.severity, status: review.status, comment: review.comment, quotedText: review.quotedText || '' }));
@@ -1487,6 +1485,7 @@ function wireGlobal() {
   window.visualViewport?.addEventListener('resize', syncVisualViewport);
   window.addEventListener('orientationchange', () => setTimeout(syncVisualViewport, 80));
   document.querySelectorAll('[data-route]').forEach(button => button.onclick = () => setRoute(button.dataset.route));
+  $('mobileMoreButton')?.addEventListener('click', openMobileMoreMenu);
   $('brandButton').onclick = () => setRoute('library');
   $('modalClose').onclick = closeModal;
   modal.addEventListener('click', event => { if (event.target === modal) closeModal(); });
@@ -1501,8 +1500,8 @@ function wireGlobal() {
     if (event.target.matches('input,textarea,select') || modal.open) return;
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return; }
     if (state.route === 'reader') {
-      if (event.key === 'ArrowLeft') $('backFrame')?.click();
-      if (event.key === 'ArrowRight') $('forwardFrame')?.click();
+      if (event.key === 'ArrowLeft') view.querySelector('[data-reader-action="back"]')?.click();
+      if (event.key === 'ArrowRight') view.querySelector('[data-reader-action="forward"]')?.click();
       if (event.key.toLowerCase() === 'c') openReviewForm({ targetType: 'text' });
       if (event.key.toLowerCase() === 'e') { state.inspectorTab = 'frame'; isMobileReader() ? openMobileFrameEditor(effectiveFrame()) : refreshReaderContent({ resetScroll: false }); }
       if (event.key.toLowerCase() === 'i') { state.inspectorTab = 'image'; refreshReaderContent({ resetScroll: false }); }

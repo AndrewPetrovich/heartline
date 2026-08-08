@@ -1,7 +1,26 @@
-import * as DB from './heartline-v301-db.js';
-import { now, uid, assignmentDefaults } from './heartline-v301-domain.js';
+import * as DB from './heartline-db.js';
+import { now, uid, assignmentDefaults } from './heartline-domain.js';
 
 const urlCache = new Map();
+
+const workerRequests = new Map();
+let imageWorker = null;
+function getImageWorker() {
+  if (!('Worker' in window)) return null;
+  if (imageWorker) return imageWorker;
+  try {
+    imageWorker = new Worker('./heartline-image-worker.js');
+    imageWorker.onmessage = event => { const req = workerRequests.get(event.data?.id); if (!req) return; workerRequests.delete(event.data.id); event.data.ok ? req.resolve(event.data) : req.reject(new Error(event.data.error || 'Image worker failed')); };
+    imageWorker.onerror = error => { for (const req of workerRequests.values()) req.reject(error); workerRequests.clear(); imageWorker?.terminate(); imageWorker = null; };
+    return imageWorker;
+  } catch (_) { return null; }
+}
+async function processImageOffMainThread(file) {
+  const worker = getImageWorker(); if (!worker) return null;
+  const id = `img:${crypto.randomUUID?.() || Math.random().toString(36).slice(2)}`;
+  const buffer = await file.arrayBuffer();
+  return new Promise((resolve, reject) => { workerRequests.set(id, { resolve, reject }); worker.postMessage({ id, buffer, mimeType: file.type }, [buffer]); });
+}
 
 function bytesToHex(bytes) { return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join(''); }
 
@@ -49,10 +68,12 @@ async function makeThumbnail(blob, maxSide = 420) {
 
 export async function importAsset(projectId, file, { source = 'upload' } = {}) {
   if (!file?.type?.startsWith('image/')) throw new Error(`${file?.name || 'Файл'} не является изображением`);
-  const hash = await sha256(file);
+  let processed = null;
+  try { processed = await processImageOffMainThread(file); } catch (_) { processed = null; }
+  const hash = processed?.hash || await sha256(file);
   const existing = (await DB.getAllByIndex('assets', 'sha256', hash)).find(asset => asset.projectId === projectId);
   if (existing) return { asset: existing, duplicate: true };
-  const generated = await makeThumbnail(file);
+  const generated = processed?.width ? { width: processed.width, height: processed.height, thumbWidth: processed.thumbWidth || processed.width, thumbHeight: processed.thumbHeight || processed.height, blob: processed.thumbBuffer ? new Blob([processed.thumbBuffer], { type: processed.thumbType || 'image/webp' }) : file } : await makeThumbnail(file);
   const assetId = `asset:${hash.slice(0, 20)}`;
   const asset = {
     assetId,

@@ -1,4 +1,4 @@
-import { clone, now } from './heartline-v301-domain.js';
+import { clone, now } from './heartline-domain.js';
 
 export function createSession(projectId, versionId, content) {
   return {
@@ -11,7 +11,7 @@ export function createSession(projectId, versionId, content) {
     ip: 0,
     branch: null,
     pendingChoice: null,
-    vars: { HONESTY: 0, ATTRACTION: 0, TRUST: 0, PROFESSIONAL_COST: 0 },
+    vars: { HONESTY: 0, ATTRACTION: 0, TRUST: 0, PROFESSIONAL_COST: 0, ...(content.initialVars || {}) },
     tech: { bg: '', cg: '', music: '', sfx: '', sprite: '', reaction: '', fade: '' },
     choices: [],
     timeline: [],
@@ -54,11 +54,25 @@ export class StoryEngine {
     const source = String(expression || '').trim().replace(/[.;]+$/, '');
     let match = source.match(/^([A-Z0-9_]+)\s*=\s*(TRUE|FALSE)$/i);
     if (match) return this.boolVariable(match[1]) === (match[2].toUpperCase() === 'TRUE');
+
+    match = source.match(/^([A-Z0-9_]+)\s+IN\s+(.+)$/i);
+    if (match) {
+      const values = match[2].split(',').map(value => value.trim().replace(/^["']|["']$/g, '').toUpperCase()).filter(Boolean);
+      return values.includes(String(this.variable(match[1]) ?? '').toUpperCase());
+    }
+
     match = source.match(/^([A-Z0-9_]+)\s*(>=|<=|>|<|=)\s*(-?\d+)$/i);
     if (match) {
       const left = Number(this.variable(match[1]) || 0);
       const right = Number(match[3]);
       return ({ '>': left > right, '<': left < right, '>=': left >= right, '<=': left <= right, '=': left === right })[match[2]];
+    }
+
+    match = source.match(/^([A-Z0-9_]+)\s*(!=|=)\s*["']?([A-Z0-9_-]+)["']?$/i);
+    if (match) {
+      const left = String(this.variable(match[1]) ?? '').toUpperCase();
+      const right = String(match[3] || '').toUpperCase();
+      return match[2] === '!=' ? left !== right : left === right;
     }
     return true;
   }
@@ -212,6 +226,9 @@ export class StoryEngine {
           const fallback = sequence.option?.fallbackGoto || sequence.option?.goto || null;
           this.session.branch = null;
           if (fallback) { this.jumpTo(this.resolveGoto(fallback)); continue; }
+          // Inline choices can return to the main sequence in the same scene.
+          // The scene IP already points to the first step after the choice.
+          continue;
         }
         const sceneIndex = this.content.scenes.findIndex(scene => scene.id === this.session.sceneId);
         const nextScene = this.content.scenes[sceneIndex + 1];
@@ -255,6 +272,11 @@ export class StoryEngine {
     const choice = scene?.steps?.find(step => step.type === 'choice' && step.id === entry.choiceId);
     const option = choice?.options?.find(item => item.id === optionId);
     if (!option) return entry;
+    if (option.condition && !this.evaluateCondition(option.condition)) return entry;
+
+    const choiceVar = `CHOICE_${String(choice.id || '').replace(/[^A-Z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toUpperCase()}`;
+    if (choiceVar !== 'CHOICE_') this.setVariable(choiceVar, String(option.id || '').toUpperCase());
+
     entry.selectedOptionId = option.id;
     entry.selectedLabel = option.label;
     this.session.pendingChoice = null;
