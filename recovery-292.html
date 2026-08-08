@@ -1,0 +1,7 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>HEARTLINE recovery</title>
+<style>body{font-family:Arial,sans-serif;background:#fff;color:#111;display:grid;place-items:center;min-height:100vh;margin:0}.box{max-width:520px;padding:32px;border:1px solid #ddd;border-radius:18px;text-align:center}button{padding:12px 18px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:700}</style></head>
+<body><div class="box"><h1>HEARTLINE</h1><p id="status">Сбрасываю старый кэш приложения…</p><button id="go" hidden>Открыть HEARTLINE</button></div>
+<script>
+(async()=>{const status=document.getElementById('status'),go=document.getElementById('go');try{if('serviceWorker'in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(r=>r.unregister()));}if('caches'in window){const keys=await caches.keys();await Promise.all(keys.filter(k=>k.startsWith('heartline-')).map(k=>caches.delete(k)));}status.textContent='Старый Service Worker и кэш удалены. Открываю новую сборку…';setTimeout(()=>location.replace('./?v=20260808-292&recovery=1'),700);}catch(e){status.textContent='Автоматический сброс не удался: '+e.message;go.hidden=false;go.onclick=()=>location.replace('./?v=20260808-292&recovery=1');}})();
+</script></body></html>

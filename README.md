@@ -1,3 +1,11 @@
+# HEARTLINE Novel Editor v2.9.2 — Hard Cache Fix
+
+Исправление запуска для GitHub Pages.
+
+Ключевое изменение: основной код теперь загружается как `heartline-app-292.js`, а стили как `heartline-styles-292.css`. Это физически новые URL, поэтому старый Service Worker не может подменить их предыдущей версией.
+
+Если после обновления базовый URL всё ещё показывает старую ошибку, один раз откройте `recovery-292.html`. Страница удалит старые Service Worker/cache и вернёт в HEARTLINE.
+
 # HEARTLINE Novel Editor v2.9 — Story Graph Pro + Bible v3 Final
 
 
