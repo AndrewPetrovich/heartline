@@ -65,6 +65,30 @@ function sceneRouteKey(scene) {
   return routeKey(scene?.id || '');
 }
 
+function countWords(value) { return (String(value || '').trim().match(/[\p{L}\p{N}’'-]+/gu) || []).length; }
+function sceneWordCount(scene) {
+  let words = 0;
+  (function walk(steps) {
+    for (const step of steps || []) {
+      if (step.type === 'choice') {
+        words += countWords(step.prompt);
+        for (const option of step.options || []) { words += countWords(option.label); walk(option.steps || []); }
+      } else if (step.type !== 'tech') words += countWords(step.text);
+    }
+  })(scene?.steps || []);
+  return words;
+}
+function choiceSignificant(step) {
+  const options = step?.options || [];
+  const targets = new Set(); let stateful = false;
+  for (const option of options) {
+    const target = optionTarget(option); if (target) targets.add(String(target));
+    if (option.condition) stateful = true;
+    (function walk(steps){ for(const item of steps||[]){ if(item.type==='tech' && ['SET','GOTO','IF'].includes(item.command)) stateful=true; if(item.type==='choice') for(const child of item.options||[]) walk(child.steps||[]); } })(option.steps||[]);
+  }
+  return stateful || targets.size > 1;
+}
+
 export function buildGraph(content, assignments, reviews) {
   const scenes = content.scenes || [];
   const sceneIds = new Set(scenes.map(scene => scene.id));
@@ -74,9 +98,11 @@ export function buildGraph(content, assignments, reviews) {
   const finalRouteScenes = scenes.filter(scene => scene.finalRoute);
   const lastFinalRouteIndex = finalRouteScenes.length ? Math.max(...finalRouteScenes.map(scene => sceneIndex.get(scene.id))) : -1;
   const finalRejoinScene = lastFinalRouteIndex >= 0 ? scenes.slice(lastFinalRouteIndex + 1).find(scene => !scene.finalRoute) || null : null;
+  const metadataFinals = Array.isArray(content.storyMetadata?.finals) ? content.storyMetadata.finals : [];
+  const metadataFinalMap = new Map(metadataFinals.map(item => [String(item.id).toUpperCase(), item]));
 
   for (const scene of scenes) {
-    const metrics = sceneFrameMetrics(content, scene.id, assignments, reviews);
+    const metrics = { ...sceneFrameMetrics(content, scene.id, assignments, reviews), words: sceneWordCount(scene) };
     const sceneOrder = sceneIndex.get(scene.id);
     nodes.push({
       id: `scene:${scene.id}`,
@@ -101,7 +127,9 @@ export function buildGraph(content, assignments, reviews) {
         title: step.prompt || step.id,
         chapterTitle: scene.chapterTitle || 'Другие',
         routeKey: sceneRouteKey(scene),
-        order: sceneOrder + .25 + choiceIndex * .08
+        order: sceneOrder + .25 + choiceIndex * .08,
+        optionCount: (step.options || []).length,
+        significant: choiceSignificant(step)
       });
     });
 
@@ -126,11 +154,13 @@ export function buildGraph(content, assignments, reviews) {
               });
             }
           } else if (step.id === 'FINAL' && ['A', 'B', 'C'].includes(String(option.id || '').toUpperCase())) {
-            const finalScene = scenes.find(candidate => candidate.finalRoute === String(option.id || '').toUpperCase());
-            if (finalScene) {
+            const finalKey = String(option.id || '').toUpperCase();
+            const finalScene = scenes.find(candidate => candidate.finalRoute === finalKey);
+            const finalMeta = metadataFinalMap.get(finalKey);
+            if (finalScene || finalMeta) {
               edges.push({
                 from: choiceNodeId,
-                to: `scene:${finalScene.id}`,
+                to: finalScene ? `scene:${finalScene.id}` : `ending:${finalKey}`,
                 kind: 'option',
                 label: option.label,
                 optionId: option.id
@@ -175,6 +205,25 @@ export function buildGraph(content, assignments, reviews) {
     }
   }
 
+  if (metadataFinals.length) {
+    const finalChapter = scenes.at(-1)?.chapterTitle || 'Финалы';
+    metadataFinals.forEach((item, index) => {
+      const key = String(item.id || index + 1).toUpperCase();
+      nodes.push({
+        id: `ending:${key}`,
+        kind: 'ending',
+        endingId: key,
+        sceneId: null,
+        title: item.title || `Финал ${key}`,
+        chapterTitle: finalChapter,
+        start: false,
+        end: true,
+        metrics: { frames: 0, words: 0, reviews: 0, missing: 0, approved: 0 },
+        routeKey: key === 'A' ? 'oath' : key === 'B' ? 'network' : key === 'C' ? 'break' : 'common',
+        order: scenes.length + 1 + index
+      });
+    });
+  }
   const chapterOrder = [];
   for (const scene of scenes) if (!chapterOrder.includes(scene.chapterTitle || 'Другие')) chapterOrder.push(scene.chapterTitle || 'Другие');
   return { nodes, edges, chapterOrder };
@@ -205,6 +254,7 @@ function nodeSearchText(node) {
 function nodeMatches(node, filter, search, visitedSceneIds) {
   const q = String(search || '').trim().toLowerCase();
   if (q && !nodeSearchText(node).includes(q)) return false;
+  if (filter === 'decisions') return node.kind === 'choice';
   if (filter === 'unread') return node.kind === 'scene' && !visitedSceneIds.has(node.sceneId);
   if (filter === 'missing') return node.kind === 'scene' && !!node.metrics?.missing;
   if (filter === 'reviews') return node.kind === 'scene' && !!node.metrics?.reviews;
@@ -370,12 +420,13 @@ function structureEdgePath(from, to, geo) {
   return `M${x1},${y1} H${gutter - 22} Q${gutter},${y1} ${gutter},${y1 + 22} V${midY - 18} Q${gutter},${midY} ${gutter - 22},${midY} H${enterX} Q${x2 - 18},${midY} ${x2 - 18},${midY + 18} V${y2} H${x2}`;
 }
 
-function makeNodeGroup(svg, node, position, { currentSceneId, visitedSceneIds, matched, dimmed = false, compact = false, onSelect, onOpen } = {}) {
+function makeNodeGroup(svg, node, position, { currentSceneId, visitedSceneIds, selectedNodeId = null, matched, dimmed = false, compact = false, onSelect, onOpen } = {}) {
   const classes = ['graph-node', node.kind, `route-${node.routeKey || 'common'}`];
   if (node.start) classes.push('start');
   if (node.end) classes.push('end');
   if (node.sceneId === currentSceneId) classes.push('current');
-  if (visitedSceneIds.has(node.sceneId)) classes.push('visited');
+  if (visitedSceneIds?.has?.(node.sceneId)) classes.push('visited');
+  if (node.id === selectedNodeId) classes.push('selected');
   if (node.metrics?.reviews) classes.push('has-reviews');
   if (matched) classes.push('matched');
   if (dimmed) classes.push('dimmed');
@@ -383,433 +434,400 @@ function makeNodeGroup(svg, node, position, { currentSceneId, visitedSceneIds, m
   const g = svgEl(svg, 'g', { transform: `translate(${position.x},${position.y})`, class: classes.join(' ') });
   g.dataset.nodeId = node.id;
   g.dataset.x = position.x; g.dataset.y = position.y; g.dataset.w = position.width; g.dataset.h = position.height;
-  const title = svgEl(svg, 'title'); title.textContent = `${node.kind === 'choice' ? 'Выбор' : node.sceneId}: ${node.title}`; g.append(title);
+  const title = svgEl(svg, 'title'); title.textContent = `${node.kind === 'choice' ? 'Выбор' : node.kind === 'ending' ? 'Финал' : node.sceneId}: ${node.title}`; g.append(title);
   g.append(svgEl(svg, 'rect', { width: position.width, height: position.height, rx: node.kind === 'choice' ? 14 : 10 }));
   const fo = svgEl(svg, 'foreignObject', { width: position.width, height: position.height });
-  const meta = node.kind === 'scene' ? `${node.metrics?.frames || 0} кадров${node.metrics?.reviews ? ` · ${node.metrics.reviews} замеч.` : ''}` : node.choiceId;
-  fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-copy"><span>${escapeHtml(node.kind === 'choice' ? 'РЕШЕНИЕ' : node.sceneId)}</span><strong>${escapeHtml(node.title)}</strong><small>${escapeHtml(meta || '')}</small></div>`;
+  const meta = node.kind === 'scene' ? `${node.metrics?.frames || 0} кадров${node.metrics?.reviews ? ` · ${node.metrics.reviews} замеч.` : ''}` : node.kind === 'ending' ? 'КОНЦОВКА' : node.choiceId;
+  fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-copy"><span>${escapeHtml(node.kind === 'choice' ? 'РЕШЕНИЕ' : node.kind === 'ending' ? 'ФИНАЛ' : node.sceneId)}</span><strong>${escapeHtml(node.title)}</strong><small>${escapeHtml(meta || '')}</small></div>`;
   g.append(fo);
   g.addEventListener('click', () => onSelect?.(node));
-  g.addEventListener('dblclick', () => { if (node.kind === 'scene') onOpen?.(node); });
+  g.addEventListener('dblclick', () => { if (node.kind === 'scene' || node.kind === 'chapter') onOpen?.(node); });
   return g;
 }
 
-function renderStructure(host, model, options) {
-  const visible = keyStructureNodes(model, options.currentSceneId, options.filter, options.search, options.visitedSceneIds);
-  const edges = compressedEdges(model, visible);
-  const geo = structureGeometry(model, visible);
-  const q = String(options.search || '').trim().toLowerCase();
-  const matched = new Set(model.nodes.filter(node => q && nodeSearchText(node).includes(q)).map(node => node.id));
 
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', `0 0 ${geo.width} ${geo.height}`);
-  svg.setAttribute('width', geo.width);
-  svg.setAttribute('height', geo.height);
-  svg.classList.add('story-graph-svg', 'graph-structure-view', 'graph-horizontal-chapters');
-
-  const defs = svgEl(svg, 'defs');
-  defs.innerHTML = '<marker id="graph-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>';
-  svg.append(defs);
-
-  const bg = svgEl(svg, 'g', { class: 'graph-background' });
-  geo.chapterMeta.forEach((chapter, chapterIndex) => {
-    bg.append(svgEl(svg, 'rect', {
-      x: 12,
-      y: chapter.y,
-      width: chapter.width,
-      height: chapter.height,
-      rx: 18,
-      class: `graph-chapter-band horizontal ${chapterIndex % 2 ? 'alt' : ''}`
-    }));
-
-    const title = svgEl(svg, 'text', {
-      x: 28,
-      y: chapter.y + 28,
-      class: 'graph-chapter-title horizontal'
-    });
-    title.textContent = chapter.chapter;
-    bg.append(title);
-
-    chapter.routeKeys.forEach(key => {
-      const laneY = chapter.laneY.get(key);
-      if (laneY == null) return;
-      bg.append(svgEl(svg, 'line', {
-        x1: geo.left - 18,
-        x2: geo.width - 42,
-        y1: laneY + 31,
-        y2: laneY + 31,
-        class: `graph-lane-line route-${key}`
-      }));
-      const laneTitle = svgEl(svg, 'text', {
-        x: 30,
-        y: laneY + 35,
-        class: `graph-lane-title route-${key}`
-      });
-      laneTitle.textContent = ROUTE_META[key]?.label || key;
-      bg.append(laneTitle);
-    });
-  });
-  svg.append(bg);
-
-  const edgeLayer = svgEl(svg, 'g', { class: 'graph-edges' });
-  for (const edge of edges) {
-    const from = geo.positions.get(edge.from);
-    const to = geo.positions.get(edge.to);
-    if (!from || !to) continue;
-    const isChapterTransition = from.chapter !== to.chapter;
-    edgeLayer.append(svgEl(svg, 'path', {
-      d: structureEdgePath(from, to, geo),
-      class: `graph-edge ${edge.kind}${isChapterTransition ? ' chapter-transition' : ''}`,
-      'marker-end': 'url(#graph-arrow)'
-    }));
-    const text = edge.label || (edge.hiddenScenes ? `${edge.hiddenScenes} сцен` : '');
-    if (text && !isChapterTransition) {
-      const label = svgEl(svg, 'text', {
-        x: (from.x + from.width + to.x) / 2,
-        y: Math.min(from.y, to.y) - 8,
-        class: `graph-edge-label ${edge.label ? 'option' : 'collapsed'}`
-      });
-      label.textContent = text.length > 34 ? `${text.slice(0, 32)}…` : text;
-      edgeLayer.append(label);
-    }
-  }
-  svg.append(edgeLayer);
-
-  const nodes = svgEl(svg, 'g', { class: 'graph-nodes' });
-  for (const node of model.nodes) {
-    if (!visible.has(node.id)) continue;
-    const position = geo.positions.get(node.id);
-    if (!position) continue;
-    nodes.append(makeNodeGroup(svg, node, position, {
-      ...options,
-      matched: matched.has(node.id),
-      compact: true
-    }));
-  }
-  svg.append(nodes);
-
-  svg.__heartlineGeometry = geo;
-  host.replaceChildren(svg);
-  return svg;
-}
-
-function chapterIndexMap(model) { return new Map(model.chapterOrder.map((c, i) => [c, i])); }
-
-function routeConnectionPath(from, to, parallelOffset = 0) {
-  const x1 = from.x + from.width;
-  const y1 = from.y + from.height / 2;
-  const x2 = to.x;
-  const y2 = to.y + to.height / 2;
-
-  // Normal left-to-right flow. Parallel choice options use a small vertical
-  // offset so A/B/C do not collapse into one invisible line.
-  if (x2 >= x1 + 16) {
-    const span = x2 - x1;
-    const bend = Math.max(34, Math.min(120, span * .42));
-    return `M${x1},${y1} C${x1 + bend},${y1 + parallelOffset} ${x2 - bend},${y2 + parallelOffset} ${x2},${y2}`;
-  }
-
-  // Rare backwards/rejoin connection: route it above the cards instead of
-  // drawing through them.
-  const lift = 56 + Math.abs(parallelOffset) + Math.abs(y2 - y1) * .18;
-  const topY = Math.min(y1, y2) - lift;
-  const rightX = Math.max(x1, x2) + 62;
-  return `M${x1},${y1} C${rightX},${y1} ${rightX},${topY} ${rightX - 24},${topY} H${x2 + 28} C${x2 + 10},${topY} ${x2 + 10},${y2} ${x2},${y2}`;
-}
-
-function renderRoutes(host, model, options) {
-  const chapterIndex = chapterIndexMap(model);
-  const chapterWidth = 255, left = 150, top = 118;
-  const routeKeys = Object.keys(ROUTE_META)
-    .filter(key => key !== 'common' && model.nodes.some(n => n.kind === 'scene' && n.routeKey === key))
-    .sort((a, b) => ROUTE_META[a].order - ROUTE_META[b].order);
+function graphFocusSet(model, sceneId) {
+  if (!sceneId) return null;
+  const startIds = model.nodes.filter(n => n.sceneId === sceneId).map(n => n.id);
+  if (!startIds.length) return null;
   const { incoming, outgoing } = graphIndex(model);
+  const keep = new Set(startIds);
+  const walk = (map, seed) => {
+    const stack = [...seed];
+    while (stack.length) {
+      const id = stack.pop();
+      for (const edge of map.get(id) || []) {
+        const next = map === outgoing ? edge.to : edge.from;
+        if (!keep.has(next)) { keep.add(next); stack.push(next); }
+      }
+    }
+  };
+  walk(incoming, startIds);
+  walk(outgoing, startIds);
+  return keep;
+}
+
+function nodeDimmed(node, options, focusSet = null) {
   const q = String(options.search || '').trim().toLowerCase();
+  const filterActive = options.filter && options.filter !== 'all';
+  if (focusSet && !focusSet.has(node.id)) return true;
+  if ((filterActive || q) && !nodeMatches(node, options.filter || 'all', options.search || '', options.visitedSceneIds || new Set())) return true;
+  return false;
+}
 
-  // Route analysis must show the decisions themselves, not only one arbitrary
-  // choice per chapter. Keep one anchor scene per chapter, all decisions, and
-  // structural merge/split scenes. The graph remains compact because ordinary
-  // linear scenes are compressed into the connections between these nodes.
-  const selectedNodes = [];
-  for (const ch of model.chapterOrder) {
-    const chapterNodes = model.nodes.filter(n => n.chapterTitle === ch);
-    const common = chapterNodes
-      .filter(n => n.kind === 'scene' && n.routeKey === 'common')
-      .sort((a, b) => a.order - b.order);
-    if (common[0]) selectedNodes.push(common[0]);
+function edgeMetricForHidden(node) {
+  if (!node || node.kind !== 'scene') return { scenes: 0, frames: 0, words: 0 };
+  return { scenes: 1, frames: node.metrics?.frames || 0, words: node.metrics?.words || 0 };
+}
 
-    for (const choice of chapterNodes.filter(n => n.kind === 'choice').sort((a, b) => a.order - b.order)) {
-      selectedNodes.push(choice);
+function compressedEdgesDetailed(model, visible, allowed = null) {
+  const { outgoing, nodeById } = graphIndex(model);
+  const result = [];
+  const seen = new Set();
+  function walk(sourceId, edge, aggregate, label, visited) {
+    if (visited.has(edge.to)) return;
+    if (allowed && !allowed.has(edge.to) && !visible.has(edge.to)) return;
+    const nextVisited = new Set(visited); nextVisited.add(edge.to);
+    if (visible.has(edge.to)) {
+      const key = `${sourceId}|${edge.to}|${label || edge.label || ''}`;
+      if (!seen.has(key) && sourceId !== edge.to) {
+        seen.add(key);
+        result.push({
+          from: sourceId,
+          to: edge.to,
+          kind: label ? 'option' : edge.kind,
+          label: label || edge.label || '',
+          hiddenScenes: aggregate.scenes,
+          hiddenFrames: aggregate.frames,
+          hiddenWords: aggregate.words
+        });
+      }
+      return;
     }
-
-    for (const node of common) {
-      const indegree = incoming.get(node.id)?.length || 0;
-      const outdegree = outgoing.get(node.id)?.length || 0;
-      if (indegree > 1 || outdegree > 1 || node.end || node.sceneId === options.currentSceneId) selectedNodes.push(node);
-    }
-
-    for (const key of routeKeys) {
-      const routeScenes = chapterNodes
-        .filter(n => n.kind === 'scene' && n.routeKey === key)
-        .sort((a, b) => a.order - b.order);
-      if (routeScenes[0]) selectedNodes.push(routeScenes[0]);
-      const ending = routeScenes.find(n => n.end);
-      if (ending && ending !== routeScenes[0]) selectedNodes.push(ending);
+    const metric = edgeMetricForHidden(nodeById.get(edge.to));
+    const nextAggregate = {
+      scenes: aggregate.scenes + metric.scenes,
+      frames: aggregate.frames + metric.frames,
+      words: aggregate.words + metric.words
+    };
+    for (const next of outgoing.get(edge.to) || []) walk(sourceId, next, nextAggregate, label || edge.label || '', nextVisited);
+  }
+  for (const sourceId of visible) {
+    for (const edge of outgoing.get(sourceId) || []) {
+      walk(sourceId, edge, { scenes: 0, frames: 0, words: 0 }, edge.kind === 'option' ? edge.label || '' : '', new Set([sourceId]));
     }
   }
+  return result;
+}
 
-  // Search/filter results are always promoted to visible nodes so a filtered
-  // graph still shows where the matching scene sits in the route.
-  if (q || options.filter !== 'all') {
-    for (const node of model.nodes) {
-      if (nodeMatches(node, options.filter, options.search, options.visitedSceneIds)) selectedNodes.push(node);
-    }
-  }
+function addArrowDefs(svg, id = 'graph2-arrow') {
+  const defs = svgEl(svg, 'defs');
+  defs.innerHTML = `<marker id="${id}" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker>`;
+  svg.append(defs);
+}
 
-  const uniq = [...new Map(selectedNodes.map(n => [n.id, n])).values()]
-    .sort((a, b) => {
-      const ca = chapterIndex.get(a.chapterTitle) || 0;
-      const cb = chapterIndex.get(b.chapterTitle) || 0;
-      if (ca !== cb) return ca - cb;
-      const ra = ROUTE_META[a.routeKey || 'common']?.order ?? 99;
-      const rb = ROUTE_META[b.routeKey || 'common']?.order ?? 99;
-      if (ra !== rb) return ra - rb;
-      return a.order - b.order || (a.kind === 'scene' ? -1 : 1);
-    });
-
-  // Count nodes in every chapter/lane before assigning Y positions. This keeps
-  // route lanes below the tallest common decision stack instead of letting
-  // cards collide with the colored flow lanes.
-  const slotCounts = new Map();
-  for (const node of uniq) {
-    const ci = chapterIndex.get(node.chapterTitle) || 0;
-    const key = node.routeKey || 'common';
-    const slot = `${ci}:${key}`;
-    slotCounts.set(slot, (slotCounts.get(slot) || 0) + 1);
-  }
-  const maxCommonRows = Math.max(1, ...model.chapterOrder.map((_, ci) => slotCounts.get(`${ci}:common`) || 0));
-  const firstRouteY = top + Math.max(150, maxCommonRows * 70 + 74);
-  const yMap = new Map([['common', top], ...routeKeys.map((key, i) => [key, firstRouteY + i * 122])]);
-  const width = Math.max(1250, left + model.chapterOrder.length * chapterWidth + 250);
-  const commonBottom = top - 40 + Math.max(1, maxCommonRows) * 70 + 58;
-  const routeBottom = routeKeys.length ? firstRouteY + (routeKeys.length - 1) * 122 + 100 : commonBottom + 100;
-  const height = Math.max(650, commonBottom + 90, routeBottom);
-
+function graphSvg(width, height, className) {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
   svg.setAttribute('width', width);
   svg.setAttribute('height', height);
-  svg.classList.add('story-graph-svg', 'graph-routes-view', routeKeys.length ? 'has-route-lanes' : 'no-route-lanes');
-
-  const defs = svgEl(svg, 'defs');
-  defs.innerHTML = `
-    <marker id="route-arrow" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="#858983"/></marker>
-    <marker id="route-arrow-option" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L8,3 z" fill="#7565d8"/></marker>`;
-  svg.append(defs);
-
-  model.chapterOrder.forEach((ch, i) => {
-    const x = left + i * chapterWidth;
-    svg.append(svgEl(svg, 'line', { x1: x, x2: x, y1: 56, y2: height - 36, class: 'route-chapter-guide' }));
-    const t = svgEl(svg, 'text', { x: x + 8, y: 42, class: 'route-chapter-label' });
-    t.textContent = ch;
-    svg.append(t);
-  });
-
-  const commonY = yMap.get('common');
-  // Wide colored ribbons are meaningful only if the source data actually has
-  // persistent route lanes (EQUAL/FIRE/MASK/etc.). For branch-lattice stories
-  // where choices reconverge, omit the misleading single grey ribbon and rely
-  // on the real directed connections drawn below.
-  if (routeKeys.length) {
-    const branchCandidates = model.nodes
-      .filter(n => n.kind === 'scene' && n.routeKey !== 'common')
-      .sort((a, b) => a.order - b.order);
-    const branchChapter = branchCandidates[0]?.chapterTitle || model.chapterOrder[1] || model.chapterOrder[0];
-    const branchX = left + (chapterIndex.get(branchChapter) || 1) * chapterWidth + 50;
-    const endX = width - 180;
-    const commonPath = svgEl(svg, 'path', {
-      d: `M70,${commonY} C${branchX * .42},${commonY} ${branchX * .72},${commonY} ${branchX},${commonY}`,
-      class: 'route-flow route-common'
-    });
-    svg.append(commonPath);
-    for (const key of routeKeys) {
-      const meta = ROUTE_META[key], y = yMap.get(key);
-      const path = svgEl(svg, 'path', {
-        d: `M${branchX},${commonY} C${branchX + 90},${commonY} ${branchX + 95},${y} ${branchX + 180},${y} C${branchX + 320},${y} ${endX - 180},${y} ${endX},${y}`,
-        class: `route-flow route-${key}`
-      });
-      svg.append(path);
-      const label = svgEl(svg, 'text', { x: 18, y: y + 5, class: `route-flow-label route-${key}` });
-      label.textContent = meta.label;
-      svg.append(label);
-    }
-    svg.append(svgEl(svg, 'circle', { cx: branchX, cy: commonY, r: 12, class: 'route-branch-station' }));
-  }
-
-  const perSlot = new Map();
-  const positions = new Map();
-  const matchState = new Map();
-  for (const node of uniq) {
-    const ci = chapterIndex.get(node.chapterTitle) || 0;
-    const key = node.routeKey || 'common';
-    const slot = `${ci}:${key}`;
-    const offset = perSlot.get(slot) || 0;
-    perSlot.set(slot, offset + 1);
-    const yBase = yMap.get(key) ?? commonY;
-    const pos = {
-      x: left + ci * chapterWidth + 18,
-      y: yBase - 40 + offset * 70,
-      width: node.kind === 'choice' ? 190 : 170,
-      height: 58
-    };
-    positions.set(node.id, pos);
-    const matched = (options.filter !== 'all' || q) && nodeMatches(node, options.filter, options.search, options.visitedSceneIds);
-    const dimmed = (options.filter !== 'all' || q) && !matched;
-    matchState.set(node.id, { matched, dimmed });
-  }
-
-  // Draw the REAL graph connections between the representative nodes. Linear
-  // scenes between them are compressed; choice options keep their A/B/C IDs.
-  const visible = new Set(uniq.map(node => node.id));
-  const routeEdges = compressedEdges(model, visible);
-  const pairTotals = new Map();
-  for (const edge of routeEdges) {
-    const key = `${edge.from}|${edge.to}`;
-    pairTotals.set(key, (pairTotals.get(key) || 0) + 1);
-  }
-  const pairSeen = new Map();
-  const edgeLayer = svgEl(svg, 'g', { class: 'route-connections' });
-  for (const edge of routeEdges) {
-    const from = positions.get(edge.from);
-    const to = positions.get(edge.to);
-    if (!from || !to) continue;
-    const pairKey = `${edge.from}|${edge.to}`;
-    const total = pairTotals.get(pairKey) || 1;
-    const index = pairSeen.get(pairKey) || 0;
-    pairSeen.set(pairKey, index + 1);
-    const parallelOffset = (index - (total - 1) / 2) * 18;
-    const dimmed = Boolean(matchState.get(edge.from)?.dimmed && matchState.get(edge.to)?.dimmed);
-    const path = svgEl(svg, 'path', {
-      d: routeConnectionPath(from, to, parallelOffset),
-      class: `route-connection ${edge.kind || 'sequence'}${dimmed ? ' dimmed' : ''}`,
-      'marker-end': edge.kind === 'option' ? 'url(#route-arrow-option)' : 'url(#route-arrow)'
-    });
-    const title = svgEl(svg, 'title');
-    title.textContent = edge.label || (edge.hiddenScenes ? `${edge.hiddenScenes} скрытых сцен` : 'Переход');
-    path.append(title);
-    edgeLayer.append(path);
-
-    const shortLabel = edge.optionId
-      ? String(edge.optionId)
-      : edge.kind === 'goto'
-        ? 'GOTO'
-        : edge.hiddenScenes > 1
-          ? `+${edge.hiddenScenes} сцен`
-          : '';
-    if (shortLabel) {
-      const label = svgEl(svg, 'text', {
-        x: (from.x + from.width + to.x) / 2,
-        y: (from.y + from.height / 2 + to.y + to.height / 2) / 2 + parallelOffset - 6,
-        class: `route-connection-label ${edge.kind || 'sequence'}${dimmed ? ' dimmed' : ''}`
-      });
-      label.textContent = shortLabel;
-      edgeLayer.append(label);
-    }
-  }
-  svg.append(edgeLayer);
-
-  const nodeLayer = svgEl(svg, 'g', { class: 'route-nodes' });
-  for (const node of uniq) {
-    const pos = positions.get(node.id);
-    if (!pos) continue;
-    const state = matchState.get(node.id) || {};
-    nodeLayer.append(makeNodeGroup(svg, node, pos, {
-      ...options,
-      matched: state.matched,
-      dimmed: state.dimmed,
-      compact: true
-    }));
-  }
-  svg.append(nodeLayer);
-
-  svg.__heartlineGeometry = { width, height, positions };
-  host.replaceChildren(svg);
+  svg.classList.add('story-graph-svg', className);
+  addArrowDefs(svg);
   return svg;
 }
 
-function renderMetro(host, model, options) {
-  const chapterIndex = chapterIndexMap(model);
-  const routeKeys = Object.keys(ROUTE_META).filter(key => key !== 'common' && model.nodes.some(n => n.kind === 'scene' && n.routeKey === key)).sort((a, b) => ROUTE_META[a].order - ROUTE_META[b].order);
-  const left = 175, chapterWidth = 220, top = 118;
-  const yMap = new Map([['common', top], ...routeKeys.map((key, i) => [key, top + 120 + i * 92])]);
-  const width = Math.max(1180, left + model.chapterOrder.length * chapterWidth + 240);
-  const height = Math.max(580, top + 120 + routeKeys.length * 92 + 85);
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`); svg.setAttribute('width', width); svg.setAttribute('height', height); svg.classList.add('story-graph-svg', 'graph-metro-view');
-
-  const routeNodes = Object.fromEntries(['common', ...routeKeys].map(key => [key, model.nodes.filter(n => n.kind === 'scene' && n.routeKey === key).sort((a, b) => a.order - b.order)]));
-  const firstRoute = routeKeys.flatMap(k => routeNodes[k]).sort((a, b) => a.order - b.order)[0];
-  const branchCi = firstRoute ? (chapterIndex.get(firstRoute.chapterTitle) || 1) : 1;
-  const branchX = left + branchCi * chapterWidth;
-  const endX = width - 145;
-
-  // Shared spine.
-  svg.append(svgEl(svg, 'path', { d: `M70,${top} H${branchX}`, class: 'metro-line metro-common' }));
-  for (const key of routeKeys) {
-    const y = yMap.get(key);
-    svg.append(svgEl(svg, 'path', { d: `M${branchX},${top} C${branchX + 56},${top} ${branchX + 56},${y} ${branchX + 116},${y} H${endX}`, class: `metro-line metro-${key}` }));
-    const label = svgEl(svg, 'text', { x: 18, y: y + 5, class: `metro-route-label metro-${key}` }); label.textContent = ROUTE_META[key].label; svg.append(label);
+function layeredPositions(nodes, edges, { left = 80, top = 80, columnGap = 250, rowGap = 96, nodeWidth = 190, choiceWidth = 220, nodeHeight = 64, chapterMode = false, chapterOrder = [] } = {}) {
+  const positions = new Map();
+  const chapterIndex = new Map(chapterOrder.map((c, i) => [c, i]));
+  const layerById = new Map();
+  if (chapterMode) {
+    for (const node of nodes) layerById.set(node.id, chapterIndex.get(node.chapterTitle) || 0);
+  } else {
+    const ordered = [...nodes].sort((a, b) => a.order - b.order);
+    const uniqueOrders = [...new Set(ordered.map(n => Math.floor(n.order * 4) / 4))].sort((a,b)=>a-b);
+    const orderIndex = new Map(uniqueOrders.map((v,i)=>[v,i]));
+    for (const node of ordered) layerById.set(node.id, orderIndex.get(Math.floor(node.order * 4) / 4) || 0);
   }
-  svg.append(svgEl(svg, 'circle', { cx: branchX, cy: top, r: 10, class: 'metro-junction' }));
-
-  // Chapter stations on shared line and per route. Each station summarizes all scenes in that chapter/route.
-  const q = String(options.search || '').trim().toLowerCase();
-  const drawStation = (key, ch, nodes, y) => {
-    if (!nodes.length) return;
-    const ci = chapterIndex.get(ch) || 0;
-    const x = left + ci * chapterWidth;
-    const active = nodes.some(n => n.sceneId === options.currentSceneId);
-    const reviews = nodes.reduce((s, n) => s + (n.metrics?.reviews || 0), 0);
-    const missing = nodes.reduce((s, n) => s + (n.metrics?.missing || 0), 0);
-    const matched = (options.filter !== 'all' || q) && nodes.some(n => nodeMatches(n, options.filter, options.search, options.visitedSceneIds));
-    const dimmed = (options.filter !== 'all' || q) && !matched;
-    const g = svgEl(svg, 'g', { class: `metro-station-group route-${key}${active ? ' current' : ''}${reviews ? ' has-reviews' : ''}${matched ? ' matched' : ''}${dimmed ? ' dimmed' : ''}` });
-    g.dataset.nodeId = nodes[0].id; g.dataset.x = x; g.dataset.y = y; g.dataset.w = 180; g.dataset.h = 70;
-    g.append(svgEl(svg, 'circle', { cx: x, cy: y, r: active ? 10 : 7, class: 'metro-station' }));
-    const maxBeads = Math.min(6, nodes.length); for (let i = 0; i < maxBeads; i++) g.append(svgEl(svg, 'circle', { cx: x + 18 + i * 12, cy: y, r: 3.2, class: 'metro-bead' }));
-    const fo = svgEl(svg, 'foreignObject', { x: x - 6, y: y - 58, width: 190, height: 50 });
-    fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="metro-copy"><span>${escapeHtml(ch)}</span><strong>${escapeHtml(nodes[0].title)}</strong><small>${nodes.length} сцен${missing ? ` · ${missing} без изображения` : ''}${reviews ? ` · ${reviews} замеч.` : ''}</small></div>`; g.append(fo);
-    g.addEventListener('click', () => options.onSelect?.(nodes[0])); g.addEventListener('dblclick', () => options.onOpen?.(nodes[0])); svg.append(g);
+  const layers = new Map();
+  for (const node of nodes) {
+    const layer = layerById.get(node.id) || 0;
+    if (!layers.has(layer)) layers.set(layer, []);
+    layers.get(layer).push(node);
+  }
+  const sortedLayers = [...layers.keys()].sort((a,b)=>a-b);
+  let maxRows = 1;
+  for (const layer of sortedLayers) {
+    const items = layers.get(layer).sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id));
+    maxRows = Math.max(maxRows, items.length);
+    items.forEach((node, index) => {
+      const width = node.kind === 'choice' ? choiceWidth : nodeWidth;
+      const y = top + index * rowGap;
+      positions.set(node.id, { x: left + layer * columnGap, y, width, height: nodeHeight });
+    });
+  }
+  return {
+    positions,
+    width: Math.max(900, left * 2 + (Math.max(0, ...sortedLayers) + 1) * columnGap + choiceWidth),
+    height: Math.max(520, top * 2 + maxRows * rowGap + nodeHeight)
   };
-  for (const ch of model.chapterOrder) {
-    const common = routeNodes.common.filter(n => n.chapterTitle === ch); drawStation('common', ch, common, top);
-    for (const key of routeKeys) drawStation(key, ch, routeNodes[key].filter(n => n.chapterTitle === ch), yMap.get(key));
+}
+
+function curvePath(from, to) {
+  const x1 = from.x + from.width, y1 = from.y + from.height / 2;
+  const x2 = to.x, y2 = to.y + to.height / 2;
+  const dx = Math.max(50, Math.abs(x2 - x1) * .42);
+  if (x2 >= x1) return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+  const lift = Math.min(y1, y2) - 70;
+  return `M${x1},${y1} C${x1 + 60},${y1} ${x1 + 60},${lift} ${x1 + 120},${lift} H${Math.max(x2 - 80, x1 + 120)} C${x2 - 36},${lift} ${x2 - 36},${y2} ${x2},${y2}`;
+}
+
+function edgeLabelText(edge, metric = 'scenes') {
+  if (edge.label) return edge.label;
+  const value = metric === 'words' ? edge.hiddenWords : metric === 'frames' ? edge.hiddenFrames : edge.hiddenScenes;
+  if (!value) return '';
+  if (metric === 'words') return `${value.toLocaleString('ru-RU')} слов`;
+  if (metric === 'frames') return `${value} кадров`;
+  return `${value} сцен`;
+}
+
+function wireGraphHover(svg) {
+  const nodes = [...svg.querySelectorAll('[data-node-id]')];
+  const edges = [...svg.querySelectorAll('[data-edge-from][data-edge-to]')];
+  const clear = () => {
+    svg.classList.remove('graph-hover-mode');
+    nodes.forEach(n => n.classList.remove('hover-related','hover-dim'));
+    edges.forEach(e => e.classList.remove('hover-related','hover-dim'));
+  };
+  nodes.forEach(node => {
+    node.addEventListener('mouseenter', () => {
+      const id = node.dataset.nodeId;
+      const related = new Set([id]);
+      for (const edge of edges) if (edge.dataset.edgeFrom === id || edge.dataset.edgeTo === id) {
+        related.add(edge.dataset.edgeFrom); related.add(edge.dataset.edgeTo);
+      }
+      svg.classList.add('graph-hover-mode');
+      nodes.forEach(n => n.classList.toggle('hover-dim', !related.has(n.dataset.nodeId)));
+      nodes.forEach(n => n.classList.toggle('hover-related', related.has(n.dataset.nodeId)));
+      edges.forEach(e => {
+        const on = e.dataset.edgeFrom === id || e.dataset.edgeTo === id;
+        e.classList.toggle('hover-related', on); e.classList.toggle('hover-dim', !on);
+      });
+    });
+    node.addEventListener('mouseleave', clear);
+  });
+}
+
+function renderEdges(svg, edges, positions, { metric = 'scenes', sankey = false } = {}) {
+  const layer = svgEl(svg, 'g', { class: sankey ? 'graph2-sankey-edges' : 'graph2-edges' });
+  const values = edges.map(edge => metric === 'words' ? edge.hiddenWords : metric === 'frames' ? edge.hiddenFrames : edge.hiddenScenes).filter(Boolean);
+  const maxValue = Math.max(1, ...values);
+  for (const edge of edges) {
+    const from = positions.get(edge.from), to = positions.get(edge.to);
+    if (!from || !to) continue;
+    const value = metric === 'words' ? edge.hiddenWords : metric === 'frames' ? edge.hiddenFrames : edge.hiddenScenes;
+    const width = sankey ? 5 + Math.sqrt(Math.max(1, value || 1) / maxValue) * 25 : 1.8;
+    const path = svgEl(svg, 'path', {
+      d: curvePath(from, to),
+      class: `graph2-edge ${edge.kind}${sankey ? ' sankey' : ''}`,
+      'marker-end': sankey ? '' : 'url(#graph2-arrow)',
+      'stroke-width': width,
+      'data-edge-from': edge.from,
+      'data-edge-to': edge.to
+    });
+    const title = svgEl(svg, 'title');
+    title.textContent = `${edge.label || 'Переход'}${edge.hiddenScenes ? ` · скрыто сцен: ${edge.hiddenScenes}` : ''}${edge.hiddenWords ? ` · слов: ${edge.hiddenWords}` : ''}`;
+    path.append(title); layer.append(path);
+    const text = edgeLabelText(edge, metric);
+    if (text) {
+      const label = svgEl(svg, 'text', {
+        x: (from.x + from.width + to.x) / 2,
+        y: (from.y + to.y) / 2 + 2,
+        class: `graph2-edge-label ${edge.kind}`
+      });
+      label.textContent = text.length > 38 ? `${text.slice(0,36)}…` : text;
+      layer.append(label);
+    }
   }
-  // Ending labels.
-  for (const key of routeKeys) {
-    const endings = routeNodes[key].filter(n => n.end); if (!endings.length) continue;
-    const y = yMap.get(key); const node = endings[endings.length - 1];
-    const g = svgEl(svg, 'g', { class: `metro-ending route-${key}` });
-    g.append(svgEl(svg, 'circle', { cx: endX, cy: y, r: 11 }));
-    const fo = svgEl(svg, 'foreignObject', { x: endX + 18, y: y - 28, width: 185, height: 58 }); fo.innerHTML = `<div xmlns="http://www.w3.org/1999/xhtml" class="metro-ending-copy"><span>КОНЦОВКА</span><strong>${escapeHtml(node.title)}</strong></div>`; g.append(fo);
-    g.addEventListener('click', () => options.onSelect?.(node)); g.addEventListener('dblclick', () => options.onOpen?.(node)); svg.append(g);
+  svg.append(layer);
+}
+
+function chapterVisibleSet(model, chapterTitle, currentSceneId) {
+  const { incoming, outgoing } = graphIndex(model);
+  const chapterNodes = model.nodes.filter(n => n.chapterTitle === chapterTitle);
+  const visible = new Set();
+  for (const node of chapterNodes) {
+    if (node.kind === 'choice' || node.sceneId === currentSceneId || node.start || node.end) visible.add(node.id);
+    if (node.kind === 'scene') {
+      const indegree = incoming.get(node.id)?.length || 0;
+      const outdegree = outgoing.get(node.id)?.length || 0;
+      if (indegree !== 1 || outdegree !== 1) visible.add(node.id);
+    }
   }
-  svg.__heartlineGeometry = { width, height };
-  host.replaceChildren(svg); return svg;
+  const scenes = chapterNodes.filter(n=>n.kind==='scene').sort((a,b)=>a.order-b.order);
+  if (scenes[0]) visible.add(scenes[0].id);
+  if (scenes.at(-1)) visible.add(scenes.at(-1).id);
+  if (visible.size < 8) chapterNodes.sort((a,b)=>a.order-b.order).slice(0,16).forEach(n=>visible.add(n.id));
+  if (visible.size > 22) {
+    const current = chapterNodes.find(n=>n.sceneId===currentSceneId);
+    const center = current?.order ?? scenes[Math.floor(scenes.length/2)]?.order ?? 0;
+    const keep = [...chapterNodes].filter(n=>visible.has(n.id)).sort((a,b)=>Math.abs(a.order-center)-Math.abs(b.order-center)).slice(0,22);
+    visible.clear(); keep.forEach(n=>visible.add(n.id));
+  }
+  return visible;
+}
+
+function renderChapterMap(host, model, options) {
+  const selected = model.nodes.find(n => n.id === options.selectedNodeId) || model.nodes.find(n => n.sceneId === options.currentSceneId) || model.nodes[0];
+  const chapterTitle = selected?.chapterTitle || model.chapterOrder[0] || 'Глава';
+  const visible = chapterVisibleSet(model, chapterTitle, options.currentSceneId);
+  const allowed = new Set(model.nodes.filter(n=>n.chapterTitle===chapterTitle).map(n=>n.id));
+  const edges = compressedEdgesDetailed(model, visible, allowed);
+  const nodes = model.nodes.filter(n=>visible.has(n.id));
+  const geo = layeredPositions(nodes, edges, { left: 84, top: 116, columnGap: 255, rowGap: 104, nodeWidth: 190, choiceWidth: 224 });
+  const svg = graphSvg(geo.width, geo.height, 'graph2-chapter-map');
+  const banner = svgEl(svg,'g',{class:'graph2-chapter-banner'});
+  banner.append(svgEl(svg,'rect',{x:20,y:20,width:geo.width-40,height:58,rx:14}));
+  const t=svgEl(svg,'text',{x:42,y:55}); t.textContent=chapterTitle; banner.append(t); svg.append(banner);
+  renderEdges(svg, edges, geo.positions, { metric: 'scenes' });
+  const focusSet = options.focusSceneId ? graphFocusSet(model, options.focusSceneId) : null;
+  const nodeLayer=svgEl(svg,'g',{class:'graph2-nodes'});
+  for(const node of nodes){
+    const pos=geo.positions.get(node.id); if(!pos)continue;
+    nodeLayer.append(makeNodeGroup(svg,node,pos,{...options,selectedNodeId:options.selectedNodeId,matched:String(options.search||'').trim()&&nodeSearchText(node).includes(String(options.search).trim().toLowerCase()),dimmed:nodeDimmed(node,options,focusSet),compact:false}));
+  }
+  svg.append(nodeLayer); wireGraphHover(svg); host.replaceChildren(svg); return svg;
+}
+
+function decisionVisibleSet(model, { includeMerges = true } = {}) {
+  const { incoming, outgoing } = graphIndex(model);
+  const visible = new Set();
+  for (const node of model.nodes) if (node.start || node.end) visible.add(node.id);
+
+  const choices = model.nodes.filter(node => node.kind === 'choice').map(node => {
+    const targets = new Set((outgoing.get(node.id) || []).map(edge => edge.to));
+    const score = (targets.size > 1 ? 12 : 0) + (node.significant ? 4 : 0) + (node.choiceId === 'FINAL' ? 30 : 0) + (node.optionCount || 0) * .2;
+    return { node, score };
+  });
+  // Choose at most ten strategic decisions, distributed across the whole story.
+  const ordered = [...choices].sort((a,b)=>a.node.order-b.node.order);
+  const bucketCount = Math.min(5, Math.max(1, model.chapterOrder.length));
+  const picked = new Map();
+  for (let bucket = 0; bucket < bucketCount; bucket++) {
+    const from = Math.floor(bucket * ordered.length / bucketCount);
+    const to = Math.floor((bucket + 1) * ordered.length / bucketCount);
+    ordered.slice(from, to).sort((a,b)=>b.score-a.score || a.node.order-b.node.order).slice(0,2).forEach(item=>picked.set(item.node.id,item.node));
+  }
+  choices.filter(item=>item.node.choiceId==='FINAL').forEach(item=>picked.set(item.node.id,item.node));
+  [...picked.values()].sort((a,b)=>a.order-b.order).slice(0,12).forEach(node=>visible.add(node.id));
+
+  if (includeMerges) {
+    const mergeScenes = model.nodes
+      .filter(node => node.kind === 'scene' && !node.start && !node.end && (incoming.get(node.id)?.length || 0) > 1)
+      .sort((a,b) => (incoming.get(b.id)?.length || 0) - (incoming.get(a.id)?.length || 0) || a.order - b.order)
+      .slice(0, 4);
+    mergeScenes.forEach(node => visible.add(node.id));
+  }
+  return visible;
+}
+
+function stagedPositions(nodes, { stages = 6, left = 90, top = 105, columnGap = 225, rowGap = 108, nodeWidth = 175, choiceWidth = 205, nodeHeight = 66 } = {}) {
+  const sorted=[...nodes].sort((a,b)=>a.order-b.order || a.id.localeCompare(b.id));
+  const positions=new Map();const buckets=Array.from({length:stages},()=>[]);
+  sorted.forEach((node,index)=>{const stage=sorted.length<=1?0:Math.min(stages-1,Math.round(index/(sorted.length-1)*(stages-1)));buckets[stage].push(node);});
+  let maxRows=1;
+  buckets.forEach((items,stage)=>{maxRows=Math.max(maxRows,items.length);items.forEach((node,row)=>{const width=node.kind==='choice'?choiceWidth:nodeWidth;positions.set(node.id,{x:left+stage*columnGap,y:top+row*rowGap,width,height:nodeHeight});});});
+  return {positions,width:left*2+stages*columnGap+choiceWidth,height:Math.max(560,top*2+maxRows*rowGap+nodeHeight),stages};
+}
+
+function renderDecisionMap(host, model, options) {
+  const visible = decisionVisibleSet(model, { includeMerges: true });
+  const edges = compressedEdgesDetailed(model, visible);
+  const nodes = model.nodes.filter(n=>visible.has(n.id));
+  const geo = stagedPositions(nodes, { stages: 6, left: 90, top: 112, columnGap: 225, rowGap: 108, nodeWidth: 176, choiceWidth: 205 });
+  const height = Math.max(620, geo.height);
+  const svg = graphSvg(geo.width, height, 'graph2-decision-map');
+  const headers=svgEl(svg,'g',{class:'graph2-column-headers'});
+  ['Начало','Ранние решения','Развитие','Перелом','Поздние решения','Финалы'].forEach((label,i)=>{const x=90+i*225;headers.append(svgEl(svg,'line',{x1:x-18,x2:x-18,y1:58,y2:height-30}));const tt=svgEl(svg,'text',{x,y:42});tt.textContent=label;headers.append(tt);});
+  svg.append(headers);
+  renderEdges(svg, edges, geo.positions, { metric:'scenes' });
+  const focusSet=options.focusSceneId?graphFocusSet(model,options.focusSceneId):null;
+  const nl=svgEl(svg,'g',{class:'graph2-nodes'});
+  for(const node of nodes){ const pos=geo.positions.get(node.id); if(!pos)continue; nl.append(makeNodeGroup(svg,node,pos,{...options,dimmed:nodeDimmed(node,options,focusSet),compact:true})); }
+  svg.append(nl); wireGraphHover(svg); host.replaceChildren(svg); return svg;
+}
+
+function renderRouteAnalysis(host, model, options) {
+  const visible = decisionVisibleSet(model, { includeMerges: false });
+  const edges = compressedEdgesDetailed(model, visible);
+  const nodes = model.nodes.filter(n=>visible.has(n.id));
+  const geo = stagedPositions(nodes, { stages: 6, left: 95, top: 112, columnGap: 225, rowGap: 112, nodeWidth: 172, choiceWidth: 198 });
+  const height=Math.max(640,geo.height);
+  const svg=graphSvg(geo.width,height,'graph2-route-analysis');
+  const headers=svgEl(svg,'g',{class:'graph2-column-headers'});
+  ['Старт','Ранний путь','Развитие','Перелом','Финальный путь','Финалы'].forEach((label,i)=>{const x=95+i*225;const tt=svgEl(svg,'text',{x,y:42});tt.textContent=label;headers.append(tt);});svg.append(headers);
+  renderEdges(svg,edges,geo.positions,{metric:options.weightMode||'scenes',sankey:true});
+  const focusSet=options.focusSceneId?graphFocusSet(model,options.focusSceneId):null;
+  const nl=svgEl(svg,'g',{class:'graph2-nodes'});
+  for(const node of nodes){const pos=geo.positions.get(node.id);if(!pos)continue;nl.append(makeNodeGroup(svg,node,pos,{...options,dimmed:nodeDimmed(node,options,focusSet),compact:true}));}svg.append(nl);
+  wireGraphHover(svg);host.replaceChildren(svg);return svg;
+}
+
+function chapterAggregate(model, chapter) {
+  const scenes=model.nodes.filter(n=>n.kind==='scene'&&n.chapterTitle===chapter);
+  const choices=model.nodes.filter(n=>n.kind==='choice'&&n.chapterTitle===chapter);
+  return {
+    id:`chapter:${chapter}`,kind:'chapter',chapterTitle:chapter,title:chapter,sceneId:scenes[0]?.sceneId||null,
+    metrics:{
+      frames:scenes.reduce((s,n)=>s+(n.metrics?.frames||0),0),
+      words:scenes.reduce((s,n)=>s+(n.metrics?.words||0),0),
+      reviews:scenes.reduce((s,n)=>s+(n.metrics?.reviews||0),0),
+      missing:scenes.reduce((s,n)=>s+(n.metrics?.missing||0),0),
+      choices:choices.length,
+      scenes:scenes.length
+    },
+    routeKey:'common',order:Math.min(...scenes.map(n=>n.order),0)
+  };
+}
+
+function chapterTransitions(model) {
+  const nodeById=new Map(model.nodes.map(n=>[n.id,n]));const counts=new Map();
+  for(const edge of model.edges){const a=nodeById.get(edge.from),b=nodeById.get(edge.to);if(!a||!b||a.chapterTitle===b.chapterTitle)continue;const key=`${a.chapterTitle}|${b.chapterTitle}`;counts.set(key,(counts.get(key)||0)+1);}
+  return [...counts.entries()].map(([key,count])=>{const [from,to]=key.split('|');return{from:`chapter:${from}`,to:`chapter:${to}`,kind:'chapter',count};});
+}
+
+function renderNovelMap(host, model, options) {
+  const chapters=model.chapterOrder.map(ch=>chapterAggregate(model,ch));
+  const endings=model.nodes.filter(n=>n.kind==='ending'||(n.kind==='scene'&&n.end));
+  const width=1400,height=900,cx=width/2,cy=height/2,rx=430,ry=315;
+  const svg=graphSvg(width,height,'graph2-novel-map');
+  const positions=new Map();
+  chapters.forEach((node,i)=>{const angle=-Math.PI/2+(i/Math.max(1,chapters.length))*Math.PI*2;positions.set(node.id,{x:cx+Math.cos(angle)*rx-90,y:cy+Math.sin(angle)*ry-36,width:180,height:72});});
+  const chapterEdges=chapterTransitions(model);
+  const edgeLayer=svgEl(svg,'g',{class:'graph2-novel-edges'});
+  for(const edge of chapterEdges){const from=positions.get(edge.from),to=positions.get(edge.to);if(!from||!to)continue;const x1=from.x+from.width/2,y1=from.y+from.height/2,x2=to.x+to.width/2,y2=to.y+to.height/2;const path=svgEl(svg,'path',{d:`M${x1},${y1} Q${cx},${cy} ${x2},${y2}`,class:'graph2-novel-edge','data-edge-from':edge.from,'data-edge-to':edge.to});const title=svgEl(svg,'title');title.textContent=`Переходов между главами: ${edge.count}`;path.append(title);edgeLayer.append(path);}svg.append(edgeLayer);
+  const start=svgEl(svg,'g',{transform:`translate(${cx-95},${cy-42})`,class:'graph2-novel-center graph-node start','data-node-id':'novel:start'});start.dataset.x=cx-95;start.dataset.y=cy-42;start.dataset.w=190;start.dataset.h=84;start.append(svgEl(svg,'rect',{width:190,height:84,rx:20}));const fo=svgEl(svg,'foreignObject',{width:190,height:84});fo.innerHTML=`<div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-copy"><span>НАЧАЛО ИСТОРИИ</span><strong>${escapeHtml(model.nodes.find(n=>n.start)?.title||'Старт')}</strong><small>${chapters.length} глав</small></div>`;start.append(fo);svg.append(start);
+  const nl=svgEl(svg,'g',{class:'graph2-nodes'});
+  for(const node of chapters){const pos=positions.get(node.id);const group=svgEl(svg,'g',{transform:`translate(${pos.x},${pos.y})`,class:`graph-node chapter${node.sceneId===options.currentSceneId?' current':''}`,'data-node-id':node.id});group.dataset.x=pos.x;group.dataset.y=pos.y;group.dataset.w=pos.width;group.dataset.h=pos.height;group.append(svgEl(svg,'rect',{width:pos.width,height:pos.height,rx:14}));const f=svgEl(svg,'foreignObject',{width:pos.width,height:pos.height});f.innerHTML=`<div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-copy"><span>ГЛАВА</span><strong>${escapeHtml(node.title)}</strong><small>${node.metrics.scenes} сцен · ${node.metrics.choices} решений</small></div>`;group.append(f);group.addEventListener('click',()=>options.onSelect?.(node));group.addEventListener('dblclick',()=>options.onOpen?.(node));nl.append(group);}svg.append(nl);
+  // Endings are placed on a smaller outer shelf at the lower right, keeping the radial chapter overview readable.
+  const endingLayer=svgEl(svg,'g',{class:'graph2-ending-layer'});endings.slice(0,8).forEach((node,i)=>{const x=width-260,y=90+i*86;const pos={x,y,width:190,height:62};const g=makeNodeGroup(svg,node,pos,{...options,compact:true});endingLayer.append(g);});svg.append(endingLayer);
+  wireGraphHover(svg);host.replaceChildren(svg);return svg;
 }
 
 export function layoutGraph(model) { return { model }; }
 
 export function renderGraph(host, model, _layout, options = {}) {
-  const mode = options.viewMode || 'structure';
-  if (mode === 'routes') return renderRoutes(host, model, options);
-  if (mode === 'metro') return renderMetro(host, model, options);
-  return renderStructure(host, model, options);
+  const mode = options.viewMode || 'chapter';
+  if (mode === 'decisions') return renderDecisionMap(host, model, options);
+  if (mode === 'routes') return renderRouteAnalysis(host, model, options);
+  if (mode === 'novel') return renderNovelMap(host, model, options);
+  return renderChapterMap(host, model, options);
 }
 
-export function renderGraphOutline(host, model, { currentSceneId = null, onSelect = null, onOpen = null } = {}) {
+export function renderGraphOutline(host, model, { currentSceneId = null, selectedChapter = null, onSelect = null, onOpen = null } = {}) {
+  const currentNode=model.nodes.find(n=>n.kind==='scene'&&n.sceneId===currentSceneId);
+  const chapterToOpen=selectedChapter||currentNode?.chapterTitle;
   const chapters = model.chapterOrder.map(chapter => ({ chapter, scenes: model.nodes.filter(n => n.kind === 'scene' && n.chapterTitle === chapter).sort((a, b) => a.order - b.order) }));
-  host.innerHTML = chapters.map(({ chapter, scenes }, ci) => `<details class="graph-outline-chapter" ${ci < 3 ? 'open' : ''}><summary><span>${escapeHtml(chapter)}</span><b>${scenes.length}</b></summary><div class="graph-outline-list">${scenes.map(scene => {
+  host.innerHTML = chapters.map(({ chapter, scenes }) => `<details class="graph-outline-chapter" ${chapter===chapterToOpen?'open':''}><summary><span>${escapeHtml(chapter)}</span><b>${scenes.length}</b></summary><div class="graph-outline-list">${scenes.map(scene => {
     const choices = model.nodes.filter(n => n.kind === 'choice' && n.sceneId === scene.sceneId);
     return `<div class="graph-outline-scene-wrap"><button class="graph-outline-scene ${scene.sceneId === currentSceneId ? 'active' : ''}" data-outline-node="${escapeHtml(scene.id)}"><span>${escapeHtml(scene.title)}</span><small>${escapeHtml(scene.sceneId)}${scene.metrics?.reviews ? ` · ${scene.metrics.reviews} замеч.` : ''}</small></button>${choices.map(choice => `<button class="graph-outline-choice" data-outline-node="${escapeHtml(choice.id)}">◇ ${escapeHtml(choice.title)}</button>`).join('')}</div>`;
   }).join('')}</div></details>`).join('');
@@ -822,24 +840,29 @@ export function renderGraphMinimap(host, svg) {
   const clone = svg.cloneNode(true);
   clone.removeAttribute('width'); clone.removeAttribute('height'); clone.style.transform = ''; clone.classList.add('graph-minimap-svg');
   clone.querySelectorAll('foreignObject').forEach(n => n.remove());
-  clone.querySelectorAll('text').forEach(n => { if (!n.classList.contains('graph-lane-title')) n.remove(); });
+  clone.querySelectorAll('text').forEach(n => n.remove());
   host.replaceChildren(clone);
 }
 
-export function enableGraphNavigation(viewport, svg, { min = 0.18, max = 2.6, initial = 0.8, onZoom = null } = {}) {
+export function enableGraphNavigation(viewport, svg, { min = 0.15, max = 2.8, initial = 0.8, onZoom = null, onClear = null } = {}) {
   let zoom = initial, panX = 0, panY = 0, dragging = false, lastX = 0, lastY = 0, spaceDown = false;
   const apply = () => { svg.style.transformOrigin = '0 0'; svg.style.transform = `translate(${panX}px,${panY}px) scale(${zoom})`; onZoom?.(zoom); };
   const setZoom = (next, cursor = null) => { const prev = zoom; zoom = Math.max(min, Math.min(max, next)); if (cursor && prev > 0) { const r = viewport.getBoundingClientRect(), cx = cursor.clientX - r.left, cy = cursor.clientY - r.top; panX = cx - (cx - panX) * (zoom / prev); panY = cy - (cy - panY) * (zoom / prev); } apply(); };
-  const fit = () => { const width = Number(svg.getAttribute('width')) || 1, height = Number(svg.getAttribute('height')) || 1, pad = 26; zoom = Math.max(min, Math.min(max, Math.min((viewport.clientWidth - pad * 2) / width, (viewport.clientHeight - pad * 2) / height, 1))); panX = Math.max(pad, (viewport.clientWidth - width * zoom) / 2); panY = Math.max(pad, (viewport.clientHeight - height * zoom) / 2); apply(); };
+  const fit = () => { const width = Number(svg.getAttribute('width')) || 1, height = Number(svg.getAttribute('height')) || 1, pad = 30; zoom = Math.max(min, Math.min(max, Math.min((viewport.clientWidth - pad * 2) / width, (viewport.clientHeight - pad * 2) / height, 1))); panX = Math.max(pad, (viewport.clientWidth - width * zoom) / 2); panY = Math.max(pad, (viewport.clientHeight - height * zoom) / 2); apply(); };
   const focusNode = nodeId => { const g = svg.querySelector(`[data-node-id="${CSS.escape(nodeId)}"]`); if (!g) return; const x = Number(g.dataset.x || 0), y = Number(g.dataset.y || 0), w = Number(g.dataset.w || 180), h = Number(g.dataset.h || 70); zoom = Math.max(min, Math.min(max, Math.max(zoom, .9))); panX = viewport.clientWidth / 2 - (x + w / 2) * zoom; panY = viewport.clientHeight / 2 - (y + h / 2) * zoom; apply(); };
   viewport.addEventListener('wheel', e => { e.preventDefault(); setZoom(zoom * (e.deltaY > 0 ? .9 : 1.1), e); }, { passive: false });
   viewport.addEventListener('pointerdown', e => { const ok = e.button === 1 || (e.button === 0 && spaceDown) || e.pointerType === 'touch'; if (!ok) return; e.preventDefault(); dragging = true; lastX = e.clientX; lastY = e.clientY; viewport.setPointerCapture(e.pointerId); viewport.classList.add('dragging'); });
   viewport.addEventListener('pointermove', e => { if (!dragging) return; panX += e.clientX - lastX; panY += e.clientY - lastY; lastX = e.clientX; lastY = e.clientY; apply(); });
   const stop = e => { if (!dragging) return; dragging = false; viewport.classList.remove('dragging'); try { viewport.releasePointerCapture(e.pointerId); } catch (_) {} };
   viewport.addEventListener('pointerup', stop); viewport.addEventListener('pointercancel', stop);
-  viewport.addEventListener('keydown', e => { if (e.code === 'Space') { spaceDown = true; viewport.classList.add('space-pan'); e.preventDefault(); } });
+  viewport.addEventListener('keydown', e => {
+    if (e.code === 'Space') { spaceDown = true; viewport.classList.add('space-pan'); e.preventDefault(); }
+    if (e.key.toLowerCase() === 'f') { e.preventDefault(); fit(); }
+    if (e.key === '0') { e.preventDefault(); setZoom(1); }
+    if (e.key === 'Escape') onClear?.();
+  });
   viewport.addEventListener('keyup', e => { if (e.code === 'Space') { spaceDown = false; viewport.classList.remove('space-pan'); } });
   viewport.addEventListener('blur', () => { spaceDown = false; viewport.classList.remove('space-pan'); });
   apply(); requestAnimationFrame(fit);
-  return { zoomIn: () => setZoom(zoom * 1.15), zoomOut: () => setZoom(zoom / 1.15), fit, focusNode, currentZoom: () => zoom, destroy: () => {} };
+  return { zoomIn: () => setZoom(zoom * 1.15), zoomOut: () => setZoom(zoom / 1.15), reset:()=>setZoom(1), fit, focusNode, currentZoom: () => zoom, destroy: () => {} };
 }

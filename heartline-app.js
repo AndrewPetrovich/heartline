@@ -70,7 +70,10 @@ const state = {
   previewPanelStyle: 'glass',
   previewDraftAssignment: null,
   previewMobileSheet: 'none',
-  graphView: 'structure',
+  graphView: 'chapter',
+  graphWeightMode: 'scenes',
+  graphFocusPath: false,
+  graphInspectorTab: 'node',
   graphFilter: 'all',
   graphSearch: '',
   graphSelected: null,
@@ -563,7 +566,7 @@ function metricsHtml(metrics) {
 
 
 function openMobileMoreMenu() {
-  openModal({ kicker: 'НАВИГАЦИЯ', title: 'Ещё', body: `<div class="mobile-more-grid"><button class="button secondary" data-more-route="assets">Изображения</button><button class="button secondary" data-more-route="reviews">Замечания</button><button class="button secondary" data-more-route="versions">Версии</button><button class="button secondary" data-more-route="gpt">GPT</button><button class="button secondary" data-more-route="graph">Граф</button><button class="button secondary" data-more-route="export">Экспорт</button></div>`, footer: '<button id="closeMoreMenu" class="button primary">Готово</button>' });
+  openModal({ kicker: 'ИНСТРУМЕНТЫ И ПРОЕКТ', title: 'Ещё', body: `<div class="mobile-more-grid"><button class="button secondary" data-more-route="preview">Мобильное превью</button><button class="button secondary" data-more-route="assets">Изображения</button><button class="button secondary" data-more-route="reviews">Замечания</button><button class="button secondary" data-more-route="gpt">GPT</button><button class="button secondary" data-more-route="versions">Версии</button><button class="button secondary" data-more-route="export">Экспорт</button></div>`, footer: '<button id="closeMoreMenu" class="button primary">Готово</button>' });
   $('closeMoreMenu').onclick = closeModal;
   $('modalBody').querySelectorAll('[data-more-route]').forEach(button => button.onclick = async () => { const route = button.dataset.moreRoute; closeModal(); await setRoute(route); });
 }
@@ -1547,94 +1550,156 @@ async function renderGraphRoute() {
   const model = buildGraph(currentContent(), state.assignments, state.reviews);
   const layout = layoutGraph(model);
   const visited = new Set((state.session?.timeline || []).map(entry => entry.sceneId));
-  const modeTitle = state.graphView === 'routes' ? 'Анализ маршрутов' : state.graphView === 'metro' ? 'Схема новеллы' : 'Структура истории';
-  const modeHelp = state.graphView === 'routes'
-    ? 'Потоки показывают, где маршруты расходятся и к каким концовкам приводят.'
-    : state.graphView === 'metro'
-      ? 'Сверхкомпактная схема: главы — станции, цветные линии — сюжетные маршруты.'
-      : 'Основной рабочий режим: главы идут сверху вниз, а сцены внутри каждой главы — строго слева направо.';
+  const modeMeta = {
+    chapter: { title: 'Карта главы', help: 'Текущая глава и ближайшие решения без визуального шума.' },
+    decisions: { title: 'Карта решений', help: 'Только ключевые решения, точки схождения и финалы всей новеллы.' },
+    routes: { title: 'Анализ путей', help: 'Sankey-представление: толщина потока показывает объём контента.' },
+    novel: { title: 'Карта романа', help: 'Радиальный обзор глав, крупных переходов и финалов.' }
+  };
+  const meta = modeMeta[state.graphView] || modeMeta.chapter;
+  const current = effectiveFrame();
+  const selected = state.graphSelected && model.nodes.find(node => node.id === state.graphSelected.id) || null;
+  if (state.graphSelected && !selected && state.graphSelected.kind !== 'chapter') state.graphSelected = null;
+  const breadcrumb = [state.project.title, selected?.chapterTitle || current?.chapterTitle, selected?.kind === 'choice' ? selected.choiceId : selected?.sceneId || current?.sceneId].filter(Boolean);
+  const showOutline = state.graphView === 'chapter';
+  const showMinimap = state.graphView === 'chapter' || state.graphView === 'decisions';
   view.className = 'view';
-  view.innerHTML = `<section class="page full"><div class="graph-page graph-view-${state.graphView}">
-    <div class="graph-modebar">
-      <div class="graph-view-tabs" role="tablist" aria-label="Представление карты">
-        <button class="graph-view-tab ${state.graphView === 'structure' ? 'active' : ''}" data-graph-view="structure" type="button"><strong>Структура</strong><span>Горизонтальные главы</span></button>
-        <button class="graph-view-tab ${state.graphView === 'routes' ? 'active' : ''}" data-graph-view="routes" type="button"><strong>Маршруты</strong><span>Потоки веток</span></button>
-        <button class="graph-view-tab ${state.graphView === 'metro' ? 'active' : ''}" data-graph-view="metro" type="button"><strong>Схема</strong><span>Metro map</span></button>
+  view.innerHTML = `<section class="page full"><div class="graph2-page graph2-view-${state.graphView}">
+    <div class="graph2-modebar">
+      <div class="graph2-tabs" role="tablist" aria-label="Режим карты">
+        <button class="graph2-tab ${state.graphView === 'chapter' ? 'active' : ''}" data-graph-view="chapter" type="button"><strong>Карта главы</strong><span>локальная структура</span></button>
+        <button class="graph2-tab ${state.graphView === 'decisions' ? 'active' : ''}" data-graph-view="decisions" type="button"><strong>Карта решений</strong><span>ключевые выборы</span></button>
+        <button class="graph2-tab ${state.graphView === 'routes' ? 'active' : ''}" data-graph-view="routes" type="button"><strong>Анализ путей</strong><span>потоки контента</span></button>
+        <button class="graph2-tab ${state.graphView === 'novel' ? 'active' : ''}" data-graph-view="novel" type="button"><strong>Карта романа</strong><span>обзор целиком</span></button>
       </div>
-      <div class="graph-mode-copy"><strong>${modeTitle}</strong><span>${modeHelp}</span></div>
+      <div class="graph2-mode-copy"><strong>${meta.title}</strong><span>${meta.help}</span></div>
     </div>
-    <div class="graph-toolbar">
-      <input id="graphSearch" class="input" placeholder="Сцена, Choice ID или название" value="${Domain.escapeHtml(state.graphSearch)}">
+    <div class="graph2-breadcrumb">${breadcrumb.map((item, index) => `<span>${index ? '› ' : ''}${Domain.escapeHtml(item)}</span>`).join('')}</div>
+    <div class="graph2-toolbar">
+      <input id="graphSearch" class="input" placeholder="Сцена, Choice ID, Fragment ID или название" value="${Domain.escapeHtml(state.graphSearch)}">
       <select id="graphFilter" class="select">
-        <option value="all">Вся новелла</option>
+        <option value="all">Вся история</option>
+        <option value="decisions">Только решения</option>
         <option value="unread">Непройденные</option>
         <option value="missing">Без изображений</option>
         <option value="reviews">С замечаниями</option>
         <option value="endings">Концовки</option>
       </select>
-      <div class="inline-actions graph-zoom-actions"><button id="graphZoomOut" class="button secondary small">−</button><span id="graphZoomLabel" class="status-badge">100%</span><button id="graphZoomIn" class="button secondary small">+</button><button id="graphFit" class="button secondary small">Вместить</button></div>
+      ${state.graphView === 'routes' ? `<select id="graphWeight" class="select"><option value="scenes">Толщина: сцены</option><option value="frames">Толщина: кадры</option><option value="words">Толщина: слова</option></select>` : ''}
+      <button id="graphFocusPath" class="button ${state.graphFocusPath ? 'primary' : 'secondary'} small">${state.graphFocusPath ? 'Показан путь' : 'Показать путь'}</button>
+      <div class="inline-actions graph2-zoom"><button id="graphZoomOut" class="button secondary small">−</button><span id="graphZoomLabel" class="status-badge">100%</span><button id="graphZoomIn" class="button secondary small">+</button><button id="graphFit" class="button secondary small">Вместить</button></div>
     </div>
-    <div class="graph-body">
-      <aside id="graphOutline" class="graph-outline"><div class="graph-side-head"><span class="kicker">OUTLINE</span><strong>Сцены и решения</strong><small>Двойной клик открывает сцену</small></div><div id="graphOutlineBody" class="graph-outline-body"></div></aside>
-      <div id="graphViewport" class="graph-viewport" tabindex="0"><div id="graphCanvas" class="graph-canvas"></div><div id="graphMinimap" class="graph-minimap" aria-label="Миникарта"></div><div class="graph-nav-tip">Колесо — масштаб · средняя кнопка / Space+drag — перемещение</div></div>
-      <aside id="graphInspector" class="graph-inspector"><span class="kicker">STORY GRAPH</span><h2>${modeTitle}</h2><p class="muted">Выберите сцену или решение на карте.</p></aside>
+    <div class="graph2-body ${showOutline ? 'has-outline' : ''}">
+      <aside id="graphOutline" class="graph2-outline ${showOutline ? '' : 'hidden'}"><div class="graph-side-head"><span class="kicker">OUTLINE</span><strong>Глава и решения</strong><small>Клик — выбрать · двойной клик — открыть</small></div><div id="graphOutlineBody" class="graph-outline-body"></div></aside>
+      <div id="graphViewport" class="graph2-viewport" tabindex="0"><div id="graphCanvas" class="graph-canvas"></div>${showMinimap ? '<div id="graphMinimap" class="graph2-minimap" aria-label="Миникарта"></div>' : ''}<div class="graph2-nav-tip">Колесо — zoom · средняя кнопка / Space+drag — pan · F — вместить · 0 — 100%</div></div>
+      <aside id="graphInspector" class="graph2-inspector"><button id="graphInspectorClose" class="graph2-inspector-close" type="button" aria-label="Закрыть">×</button><div id="graphInspectorBody">${graphModeInspectorHtml(meta.title, model)}</div></aside>
     </div>
   </div></section>`;
   $('graphFilter').value = state.graphFilter;
-  const openNode = node => { const first = sceneFrames(sceneById(node.sceneId))[0]; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); };
+  if ($('graphWeight')) $('graphWeight').value = state.graphWeightMode;
+  const openNode = node => { const first = node?.sceneId ? sceneFrames(sceneById(node.sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); };
   const selectNode = node => {
+    state.graphSelected = node;
+    if (node?.sceneId) state.selectedSceneId = node.sceneId;
     showGraphInspector(node, model);
     state.graphNavigation?.focusNode?.(node.id);
+    $('graphInspector')?.classList.add('mobile-open');
   };
   const draw = () => {
+    const selectedId = state.graphSelected?.id || null;
+    const focusSceneId = state.graphFocusPath ? (state.graphSelected?.sceneId || current?.sceneId) : null;
     const svg = renderGraph($('graphCanvas'), model, layout, {
       viewMode: state.graphView,
-      currentSceneId: effectiveFrame()?.sceneId,
+      currentSceneId: current?.sceneId,
+      selectedNodeId: selectedId,
       visitedSceneIds: visited,
       filter: state.graphFilter,
       search: state.graphSearch,
+      weightMode: state.graphWeightMode,
+      focusSceneId,
       onSelect: selectNode,
       onOpen: openNode
     });
     state.graphNavigation?.destroy?.();
-    state.graphNavigation = enableGraphNavigation($('graphViewport'), svg, { initial: state.graphView === 'metro' ? .9 : .8, onZoom: zoom => { if ($('graphZoomLabel')) $('graphZoomLabel').textContent = `${Math.round(zoom * 100)}%`; const vp=$('graphViewport'); vp?.classList.toggle('semantic-low',zoom<.48); vp?.classList.toggle('semantic-mid',zoom>=.48&&zoom<.78); vp?.classList.toggle('semantic-high',zoom>=.78); } });
-    if (state.graphView === 'structure') {
-      renderGraphOutline($('graphOutlineBody'), model, { currentSceneId: effectiveFrame()?.sceneId, onSelect: selectNode, onOpen: openNode });
+    const initial = state.graphView === 'novel' ? .82 : state.graphView === 'routes' ? .72 : .84;
+    state.graphNavigation = enableGraphNavigation($('graphViewport'), svg, {
+      initial,
+      onZoom: zoom => {
+        if ($('graphZoomLabel')) $('graphZoomLabel').textContent = `${Math.round(zoom * 100)}%`;
+        const vp = $('graphViewport');
+        vp?.classList.toggle('semantic-low', zoom < .42);
+        vp?.classList.toggle('semantic-mid', zoom >= .42 && zoom < .75);
+        vp?.classList.toggle('semantic-high', zoom >= .75);
+      },
+      onClear: () => { state.graphSelected = null; state.graphFocusPath = false; renderGraphRoute(); }
+    });
+    if (showOutline) {
+      renderGraphOutline($('graphOutlineBody'), model, { currentSceneId: current?.sceneId, selectedChapter: state.graphSelected?.chapterTitle || current?.chapterTitle, onSelect: selectNode, onOpen: openNode });
+    }
+    if (showMinimap && $('graphMinimap')) {
       renderGraphMinimap($('graphMinimap'), svg);
       $('graphMinimap').onclick = () => state.graphNavigation?.fit();
+    }
+    if (state.graphSelected?.id) requestAnimationFrame(() => state.graphNavigation?.focusNode?.(state.graphSelected.id));
+    else if (state.graphSearch.trim()) {
+      const q = state.graphSearch.trim().toLowerCase();
+      const found = model.nodes.find(node => `${node.sceneId || ''} ${node.choiceId || ''} ${node.title || ''}`.toLowerCase().includes(q));
+      if (found) requestAnimationFrame(() => state.graphNavigation?.focusNode?.(found.id));
     }
   };
   draw();
   view.querySelectorAll('[data-graph-view]').forEach(button => button.onclick = () => { state.graphView = button.dataset.graphView; renderGraphRoute(); });
   $('graphSearch').oninput = () => { state.graphSearch = $('graphSearch').value; renderGraphRoute(); };
   $('graphFilter').onchange = () => { state.graphFilter = $('graphFilter').value; renderGraphRoute(); };
+  $('graphWeight')?.addEventListener('change', () => { state.graphWeightMode = $('graphWeight').value; renderGraphRoute(); });
+  $('graphFocusPath').onclick = () => { state.graphFocusPath = !state.graphFocusPath; renderGraphRoute(); };
   $('graphZoomOut').onclick = () => state.graphNavigation?.zoomOut();
   $('graphZoomIn').onclick = () => state.graphNavigation?.zoomIn();
   $('graphFit').onclick = () => state.graphNavigation?.fit();
+  $('graphInspectorClose').onclick = () => $('graphInspector')?.classList.remove('mobile-open');
+}
+
+function graphModeInspectorHtml(title, model) {
+  const scenes = model.nodes.filter(n => n.kind === 'scene');
+  const choices = model.nodes.filter(n => n.kind === 'choice');
+  const endings = model.nodes.filter(n => n.kind === 'ending' || (n.kind === 'scene' && n.end));
+  const words = scenes.reduce((sum, n) => sum + (n.metrics?.words || 0), 0);
+  return `<span class="kicker">STORY GRAPH 2.0</span><h2>${Domain.escapeHtml(title)}</h2><p class="muted">Выберите узел на карте.</p><div class="metric-grid graph2-inspector-metrics"><div class="metric"><strong>${scenes.length}</strong><span>сцен</span></div><div class="metric"><strong>${choices.length}</strong><span>решений</span></div><div class="metric"><strong>${endings.length}</strong><span>финалов</span></div><div class="metric"><strong>${words.toLocaleString('ru-RU')}</strong><span>слов</span></div></div>`;
 }
 
 function showGraphInspector(node, model = null) {
   state.graphSelected = node;
-  const host = $('graphInspector');
-  if (!host) return;
-  const outgoing = (model?.edges || []).filter(edge => edge.from === node.id);
-  const incoming = (model?.edges || []).filter(edge => edge.to === node.id);
-  if (node.kind === 'choice') {
+  const host = $('graphInspectorBody') || $('graphInspector');
+  if (!host || !node) return;
+  const outgoing = node.kind === 'chapter' ? [] : (model?.edges || []).filter(edge => edge.from === node.id);
+  const incoming = node.kind === 'chapter' ? [] : (model?.edges || []).filter(edge => edge.to === node.id);
+  const scene = node.sceneId ? sceneById(node.sceneId) : null;
+  const tab = state.graphInspectorTab || 'node';
+  const tabs = `<div class="graph2-inspector-tabs"><button class="${tab === 'node' ? 'active' : ''}" data-graph-inspector-tab="node">Узел</button><button class="${tab === 'links' ? 'active' : ''}" data-graph-inspector-tab="links">Связи</button><button class="${tab === 'metrics' ? 'active' : ''}" data-graph-inspector-tab="metrics">Метрики</button></div>`;
+  let body = '';
+  if (tab === 'links') {
+    const renderLink = (edge, direction) => { const id = direction === 'in' ? edge.from : edge.to; const target = model?.nodes?.find(item => item.id === id); return `<button class="graph-inspector-link" data-inspector-node="${Domain.escapeHtml(id)}"><span>${Domain.escapeHtml(edge.label || target?.title || 'Переход')}</span><small>${direction === 'in' ? '←' : '→'} ${Domain.escapeHtml(target?.title || target?.sceneId || id)}</small></button>`; };
+    body = `<section class="graph-inspector-section"><h3>Входящие</h3>${incoming.length ? incoming.map(edge => renderLink(edge, 'in')).join('') : '<p class="muted">Нет входящих связей.</p>'}</section><section class="graph-inspector-section"><h3>Исходящие</h3>${outgoing.length ? outgoing.map(edge => renderLink(edge, 'out')).join('') : '<p class="muted">Нет исходящих связей.</p>'}</section>`;
+  } else if (tab === 'metrics') {
+    const metrics = node.metrics || {};
+    body = `<div class="metric-grid graph2-inspector-metrics"><div class="metric"><strong>${metrics.scenes ?? (node.kind === 'scene' ? 1 : '—')}</strong><span>сцен</span></div><div class="metric"><strong>${metrics.frames ?? '—'}</strong><span>кадров</span></div><div class="metric"><strong>${metrics.words?.toLocaleString?.('ru-RU') ?? '—'}</strong><span>слов</span></div><div class="metric"><strong>${metrics.reviews ?? 0}</strong><span>замечаний</span></div><div class="metric"><strong>${metrics.missing ?? 0}</strong><span>без визуала</span></div><div class="metric"><strong>${node.optionCount ?? metrics.choices ?? '—'}</strong><span>вариантов/решений</span></div></div>`;
+  } else if (node.kind === 'choice') {
     const options = outgoing.filter(edge => edge.kind === 'option');
-    host.innerHTML = `<span class="kicker">РЕШЕНИЕ</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.choiceId)} · ${Domain.escapeHtml(node.chapterTitle)}</p>
-      <section class="graph-inspector-section"><h3>Варианты</h3>${options.length ? options.map(edge => { const target = model?.nodes?.find(item => item.id === edge.to); return `<button class="graph-inspector-link" data-inspector-node="${Domain.escapeHtml(edge.to)}"><span>${Domain.escapeHtml(edge.label || 'Вариант')}</span><small>→ ${Domain.escapeHtml(target?.title || target?.sceneId || '')}</small></button>`; }).join('') : '<p class="muted">Переходы не определены.</p>'}</section>
-      <section class="graph-inspector-section"><h3>Связи</h3><div class="graph-link-stats"><span><b>${incoming.length}</b> входов</span><span><b>${outgoing.length}</b> выходов</span></div></section>
-      <button id="graphReader" class="button primary">Открыть сцену</button>`;
+    body = `<span class="kicker">РЕШЕНИЕ</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.choiceId)} · ${Domain.escapeHtml(node.chapterTitle)}</p><span class="status-badge ${node.significant ? 'needs-review' : 'draft'}">${node.significant ? 'Значимое решение' : 'Локальный выбор'}</span><section class="graph-inspector-section"><h3>Варианты</h3>${options.length ? options.map(edge => { const target = model?.nodes?.find(item => item.id === edge.to); return `<button class="graph-inspector-link" data-inspector-node="${Domain.escapeHtml(edge.to)}"><span>${Domain.escapeHtml(edge.label || 'Вариант')}</span><small>→ ${Domain.escapeHtml(target?.title || target?.sceneId || '')}</small></button>`; }).join('') : '<p class="muted">Переходы не определены.</p>'}</section>`;
+  } else if (node.kind === 'chapter') {
+    body = `<span class="kicker">ГЛАВА</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">Крупный блок всей новеллы.</p>`;
+  } else if (node.kind === 'ending') {
+    body = `<span class="kicker">ФИНАЛ</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.endingId || '')} · концовка новеллы</p><span class="graph-route-badge route-${node.routeKey || 'common'}">Финальный маршрут</span>`;
   } else {
-    host.innerHTML = `<span class="kicker">СЦЕНА</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.sceneId)} · ${Domain.escapeHtml(node.chapterTitle)}</p>
-      <div class="metric-grid graph-inspector-metrics"><div class="metric"><strong>${node.metrics.frames}</strong><span>кадров</span></div><div class="metric"><strong>${node.metrics.missing}</strong><span>без изображений</span></div><div class="metric"><strong>${node.metrics.approved}</strong><span>утверждено</span></div><div class="metric"><strong>${node.metrics.reviews}</strong><span>замечаний</span></div></div>
-      <section class="graph-inspector-section"><h3>Маршрут</h3><span class="graph-route-badge route-${node.routeKey || 'common'}">${node.routeKey === 'equal' ? 'На равных' : node.routeKey === 'fire' ? 'Игра с огнём' : node.routeKey === 'mask' ? 'Без масок' : node.routeKey === 'direct' ? 'Прямой маршрут' : node.routeKey === 'oath' ? 'Старая Клятва' : node.routeKey === 'network' ? 'Новая сеть' : node.routeKey === 'break' ? 'Разрыв' : 'Общая линия'}</span><div class="graph-link-stats"><span><b>${incoming.length}</b> входов</span><span><b>${outgoing.length}</b> выходов</span></div></section>
-      <div class="grid"><button id="graphReader" class="button primary">Открыть в Reader</button><button id="graphStoryboard" class="button secondary">Открыть Storyboard</button><button id="graphPreview" class="button secondary">Открыть Preview</button></div>`;
+    body = `<span class="kicker">СЦЕНА</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.sceneId || '')} · ${Domain.escapeHtml(node.chapterTitle || '')}</p><section class="graph-inspector-section"><h3>Маршрут</h3><span class="graph-route-badge route-${node.routeKey || 'common'}">${node.routeKey === 'equal' ? 'На равных' : node.routeKey === 'fire' ? 'Игра с огнём' : node.routeKey === 'mask' ? 'Без масок' : node.routeKey === 'direct' ? 'Прямой маршрут' : node.routeKey === 'oath' ? 'Старая Клятва' : node.routeKey === 'network' ? 'Новая сеть' : node.routeKey === 'break' ? 'Разрыв' : 'Общая линия'}</span></section>`;
   }
+  host.innerHTML = `${tabs}${body}<div class="graph2-inspector-actions">${node.sceneId ? '<button id="graphReader" class="button primary">Открыть в Читать</button><button id="graphStoryboard" class="button secondary">Сториборд</button><button id="graphPreview" class="button secondary">Превью</button>' : ''}<button id="graphInspectorFocus" class="button secondary">${state.graphFocusPath ? 'Снять фокус пути' : 'Показать путь'}</button></div>`;
+  host.querySelectorAll('[data-graph-inspector-tab]').forEach(button => button.onclick = () => { state.graphInspectorTab = button.dataset.graphInspectorTab; showGraphInspector(node, model); });
   host.querySelectorAll('[data-inspector-node]').forEach(button => button.onclick = () => { const target = model?.nodes?.find(item => item.id === button.dataset.inspectorNode); if (target) { showGraphInspector(target, model); state.graphNavigation?.focusNode?.(target.id); } });
-  $('graphReader').onclick = () => { const first = sceneFrames(sceneById(node.sceneId))[0]; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); };
-  $('graphStoryboard')?.addEventListener('click', () => { state.selectedSceneId = node.sceneId; setRoute('storyboard'); });
-  $('graphPreview')?.addEventListener('click', () => { const first = sceneFrames(sceneById(node.sceneId))[0]; if (first) selectFragment(first.fragmentId, { route: 'preview', direct: true }); });
+  $('graphReader')?.addEventListener('click', () => { const first = node.sceneId ? sceneFrames(sceneById(node.sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); });
+  $('graphStoryboard')?.addEventListener('click', () => { if (node.sceneId) { state.selectedSceneId = node.sceneId; setRoute('storyboard'); } });
+  $('graphPreview')?.addEventListener('click', () => { const first = node.sceneId ? sceneFrames(sceneById(node.sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'preview', direct: true }); });
+  $('graphInspectorFocus')?.addEventListener('click', () => { state.graphFocusPath = !state.graphFocusPath; renderGraphRoute(); });
 }
 
 function productionPreflight() { const validation=parser.validateNovel(Domain.applyTextEditsToContent(currentContent(),state.workspace.textEdits||{}));const metrics=Domain.projectMetrics(currentContent(),state.workspace,state.assignments,state.reviews);const criticalReviews=state.reviews.filter(review=>review.severity==='critical'&&!Domain.CLOSED_REVIEW_STATUSES.has(review.status)).length;const blockers=[];if(!validation.ok)blockers.push(`${validation.errors?.length||1} ошибок структуры`);if(metrics.missing)blockers.push(`${metrics.missing} кадров без изображения`);if(metrics.needsReview)blockers.push(`${metrics.needsReview} визуалов требуют проверки`);if(criticalReviews)blockers.push(`${criticalReviews} критичных замечаний`);return{validation,metrics,criticalReviews,blockers,ready:blockers.length===0};}

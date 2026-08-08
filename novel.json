@@ -114,24 +114,7 @@
       },
       "startSceneExists": true,
       "brokenGotoCount": 0
-    },
-    "finals": [
-      {
-        "id": "EQUAL",
-        "title": "На равных",
-        "endingType": "main"
-      },
-      {
-        "id": "FIRE",
-        "title": "Игра с огнём",
-        "endingType": "main"
-      },
-      {
-        "id": "MASK",
-        "title": "Без масок",
-        "endingType": "main"
-      }
-    ]
+    }
   },
   "characters": [
     {
