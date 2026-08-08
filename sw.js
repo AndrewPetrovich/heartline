@@ -1,12 +1,12 @@
-const BUILD = '2.9.2-292';
+const BUILD = '2.10-2100';
 const CACHE = `heartline-editor-${BUILD}`;
 const PRECACHE = [
-  './heartline-styles-292.css',
-  './heartline-app-292.js',
-  './storage.js?v=20260808-292',
-  './parser.js?v=20260808-292',
-  './exporter.js?v=20260808-292',
-  './builtin-novel.js?v=20260808-292',
+  './heartline-styles-2100.css',
+  './heartline-app-2100.js',
+  './storage.js?v=20260808-2100',
+  './parser.js?v=20260808-2100',
+  './exporter.js?v=20260808-2100',
+  './builtin-novel.js?v=20260808-2100',
   './manifest.webmanifest',
   './icon-192.png',
   './icon-512.png'
