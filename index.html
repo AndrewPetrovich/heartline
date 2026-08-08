@@ -8,17 +8,17 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="HEARTLINE" />
-  <title>HEARTLINE Editor v3</title>
+  <title>HEARTLINE Editor v3.0.1</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="app-v300/app.css" />
+  <link rel="stylesheet" href="heartline-v301-app.css" />
 </head>
 <body>
   <div id="app" class="app-shell">
     <header class="topbar">
       <button id="brandButton" class="brand" type="button" aria-label="Открыть библиотеку">
         <span class="brand-mark">H</span>
-        <span><strong>HEARTLINE</strong><small>Frame & Visual Editor</small></span>
+        <span><strong>HEARTLINE</strong><small>Frame &amp; Visual Editor</small></span>
       </button>
       <nav id="mainNav" class="main-nav" aria-label="Разделы приложения">
         <button data-route="library" class="nav-button active">Библиотека</button>
@@ -60,9 +60,9 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
-  <script>window.HEARTLINE_BUILD='3.0.0';</script>
-  <script src="legacy/parser.js"></script>
-  <script src="legacy/exporter.js"></script>
-  <script type="module" src="app-v300/app.js"></script>
+  <script>window.HEARTLINE_BUILD='3.0.1-flat';</script>
+  <script src="heartline-v301-parser.js"></script>
+  <script src="heartline-v301-exporter.js"></script>
+  <script type="module" src="heartline-v301-app.js"></script>
 </body>
 </html>
