@@ -3,162 +3,66 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="theme-color" content="#ffffff" />
+  <meta name="theme-color" content="#f7f7f5" />
   <meta name="color-scheme" content="light" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="HEARTLINE" />
-  <title>HEARTLINE Novel Editor</title>
+  <title>HEARTLINE Editor v3</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="heartline-styles-2100.css" />
+  <link rel="stylesheet" href="app-v300/app.css" />
 </head>
 <body>
   <div id="app" class="app-shell">
-    <header class="app-header">
-      <button id="brandBtn" class="brand-button" type="button" aria-label="Открыть библиотеку">
+    <header class="topbar">
+      <button id="brandButton" class="brand" type="button" aria-label="Открыть библиотеку">
         <span class="brand-mark">H</span>
-        <span class="brand-copy"><strong>HEARTLINE</strong><small>Novel Editor</small></span>
+        <span><strong>HEARTLINE</strong><small>Frame & Visual Editor</small></span>
       </button>
-      <nav id="mainNav" class="main-nav" aria-label="Основная навигация">
-        <button data-route="library" class="nav-item active">Библиотека</button>
-        <button data-route="reader" class="nav-item">Читать</button>
-        <button data-route="reviews" class="nav-item">Замечания</button>
-        <button data-route="versions" class="nav-item">Версии</button>
-        <button data-route="gpt" class="nav-item">GPT</button>
-        <button data-route="export" class="nav-item">Экспорт</button>
+      <nav id="mainNav" class="main-nav" aria-label="Разделы приложения">
+        <button data-route="library" class="nav-button active">Библиотека</button>
+        <button data-route="reader" class="nav-button">Читать</button>
+        <button data-route="storyboard" class="nav-button">Сториборд</button>
+        <button data-route="assets" class="nav-button">Изображения</button>
+        <button data-route="preview" class="nav-button">Превью</button>
+        <button data-route="reviews" class="nav-button">Замечания</button>
+        <button data-route="versions" class="nav-button">Версии</button>
+        <button data-route="gpt" class="nav-button">GPT</button>
+        <button data-route="graph" class="nav-button">Граф</button>
+        <button data-route="export" class="nav-button">Экспорт</button>
       </nav>
-      <div class="header-actions">
-        <button id="globalSearchBtn" class="icon-text-btn" type="button" title="Поиск">⌕ <span>Поиск</span></button>
-        <button id="installBtn" class="icon-text-btn hidden" type="button">＋ <span>Установить</span></button>
+      <div class="topbar-actions">
+        <button id="undoButton" class="icon-button" type="button" title="Отменить" aria-label="Отменить">↶</button>
+        <button id="redoButton" class="icon-button" type="button" title="Повторить" aria-label="Повторить">↷</button>
+        <button id="installButton" class="button secondary hidden" type="button">Установить</button>
       </div>
     </header>
-
-    <main id="routeHost" class="route-host" tabindex="-1"></main>
+    <main id="view" class="view" tabindex="-1"></main>
   </div>
 
-  <input id="novelFileInput" type="file" accept=".docx,.json,.zip" multiple hidden />
-  <input id="gptFileInput" type="file" accept=".json,.zip" hidden />
-  <input id="backupFileInput" type="file" accept=".zip,.json" hidden />
+  <input id="novelInput" type="file" accept=".docx,.json,.zip" multiple hidden />
+  <input id="assetInput" type="file" accept="image/*,.zip" multiple hidden />
+  <input id="frameAssetInput" type="file" accept="image/*" hidden />
+  <input id="gptInput" type="file" accept=".json,.zip" hidden />
+  <input id="projectImportInput" type="file" accept=".zip,.json" hidden />
 
-  <dialog id="importDialog" class="modal modal-wide">
-    <form method="dialog" class="modal-card">
-      <header class="modal-head">
-        <div><span class="kicker">ИМПОРТ</span><h2>Новая версия сценария</h2></div>
-        <button value="cancel" class="icon-btn" aria-label="Закрыть">×</button>
+  <dialog id="modal" class="modal">
+    <div class="modal-card">
+      <header class="modal-header">
+        <div><span id="modalKicker" class="kicker"></span><h2 id="modalTitle"></h2></div>
+        <button id="modalClose" class="icon-button" type="button" aria-label="Закрыть">×</button>
       </header>
-      <div id="importDialogBody" class="modal-body"></div>
-      <footer id="importDialogFooter" class="modal-footer"></footer>
-    </form>
-  </dialog>
-
-  <dialog id="reviewDialog" class="modal">
-    <form id="reviewForm" method="dialog" class="modal-card">
-      <header class="modal-head">
-        <div><span class="kicker">ВЫЧИТКА</span><h2 id="reviewDialogTitle">Добавить замечание</h2></div>
-        <button value="cancel" class="icon-btn" aria-label="Закрыть">×</button>
-      </header>
-      <div class="modal-body form-stack">
-        <div id="reviewQuotedWrap" class="quote-box hidden"><span>Выделенный текст</span><blockquote id="reviewQuotedText"></blockquote></div>
-        <label class="field"><span>Категория</span><select id="reviewCategory">
-          <option>Стиль</option><option>Диалог</option><option>Логика</option><option>Темп</option><option>Персонаж</option><option>Повтор</option><option>Опечатка</option><option>Другое</option>
-        </select></label>
-        <label class="field"><span>Важность</span><select id="reviewSeverity"><option value="normal">Обычное</option><option value="critical">Критичное</option></select></label>
-        <label class="field"><span>Комментарий</span><textarea id="reviewComment" rows="6" placeholder="Что именно нужно изменить и почему?"></textarea></label>
-      </div>
-      <footer class="modal-footer">
-        <button value="cancel" class="btn secondary">Отмена</button>
-        <button id="saveReviewBtn" value="default" class="btn primary">Сохранить замечание</button>
-      </footer>
-    </form>
-  </dialog>
-
-  <dialog id="editDialog" class="modal modal-wide">
-    <form id="editForm" method="dialog" class="modal-card">
-      <header class="modal-head">
-        <div><span class="kicker">РЕДАКТИРОВАНИЕ</span><h2>Редактировать текст</h2></div>
-        <button value="cancel" class="icon-btn" aria-label="Закрыть">×</button>
-      </header>
-      <div class="modal-body edit-grid">
-        <div class="edit-pane"><span class="pane-label">Оригинал</span><div id="editOriginalText" class="readonly-text"></div></div>
-        <label class="edit-pane field"><span class="pane-label">Текущая редакция</span><textarea id="editCurrentText" rows="12"></textarea></label>
-      </div>
-      <footer class="modal-footer split-footer">
-        <button id="restoreOriginalBtn" type="button" class="btn ghost">Восстановить оригинал</button>
-        <div><button value="cancel" class="btn secondary">Отмена</button><button id="saveEditBtn" value="default" class="btn primary">Сохранить правку</button></div>
-      </footer>
-    </form>
-  </dialog>
-
-  <dialog id="replayDialog" class="modal">
-    <form method="dialog" class="modal-card">
-      <header class="modal-head"><div><span class="kicker">МАРШРУТ</span><h2>Переиграть отсюда?</h2></div><button value="cancel" class="icon-btn">×</button></header>
-      <div class="modal-body"><p>Будет создана новая сессия прохождения от выбранного места. Уже прочитанная история останется в старой сессии.</p></div>
-      <footer class="modal-footer"><button value="cancel" class="btn secondary">Отмена</button><button id="confirmReplayBtn" value="default" class="btn danger">Переиграть отсюда</button></footer>
-    </form>
-  </dialog>
-
-  <dialog id="searchDialog" class="modal modal-wide">
-    <form method="dialog" class="modal-card">
-      <header class="modal-head"><div><span class="kicker">ПОИСК</span><h2>Поиск по новелле</h2></div><button value="cancel" class="icon-btn">×</button></header>
-      <div class="modal-body">
-        <input id="globalSearchInput" class="search-input large" placeholder="Текст, персонаж, Scene ID или Fragment ID" autocomplete="off" />
-        <div id="globalSearchResults" class="search-results"></div>
-      </div>
-    </form>
-  </dialog>
-
-  <dialog id="candidateDialog" class="modal modal-xl">
-    <form method="dialog" class="modal-card">
-      <header class="modal-head"><div><span class="kicker">GPT DIFF</span><h2>Проверка исправлений</h2></div><button value="cancel" class="icon-btn">×</button></header>
-      <div id="candidateDialogBody" class="modal-body"></div>
-      <footer id="candidateDialogFooter" class="modal-footer"></footer>
-    </form>
-  </dialog>
-
-
-  <dialog id="branchGraphDialog" class="branch-graph-dialog">
-    <div class="branch-graph-shell">
-      <header class="branch-graph-head">
-        <div><span class="kicker">STORY GRAPH</span><h2>Карта ветвлений</h2><p id="graphStats">Структура новеллы</p></div>
-        <div class="branch-graph-head-actions"><button id="graphCurrent" class="btn secondary small" type="button">Текущая сцена</button><button id="closeBranchGraphBtn" class="icon-btn" type="button" aria-label="Закрыть">×</button></div>
-      </header>
-      <div class="branch-graph-toolbar">
-        <input id="graphSearch" class="search-input" placeholder="Сцена, Choice ID или название" />
-        <select id="graphFilter" class="select"><option value="all">Вся новелла</option><option value="current">Текущий маршрут</option><option value="unread">Непройденные</option><option value="reviews">С замечаниями</option><option value="endings">Концовки</option></select>
-        <div class="graph-view-actions"><button id="graphStart" class="btn secondary small" type="button">Начало</button><button id="graphActivePath" class="btn secondary small" type="button">Мой путь</button><button id="graphClearFocus" class="btn secondary small hidden" type="button">Сбросить пути</button></div>
-        <div class="graph-zoom-controls"><button id="graphZoomOut" class="btn secondary small" type="button">−</button><span id="graphZoomLabel">100%</span><button id="graphZoomIn" class="btn secondary small" type="button">+</button><button id="graphFit" class="btn secondary small" type="button">Вместить</button><button id="graphExportSvg" class="btn secondary small" type="button">SVG</button></div>
-      </div>
-      <div id="graphEndingJumps" class="graph-ending-jumps" aria-label="Концовки новеллы"></div>
-      <div class="branch-graph-body">
-        <div id="graphViewport" class="graph-viewport" tabindex="0" aria-label="Холст карты ветвлений"><svg id="branchGraphSvg" class="branch-graph-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
-        <aside class="graph-inspector"><div class="graph-inspector-head"><strong>Узел</strong><span>Кликните по сцене или выбору</span></div><div id="graphInspectorBody" class="graph-inspector-body"></div></aside>
-      </div>
-      <footer class="branch-graph-legend"><span><i class="legend-dot start"></i>Начало</span><span><i class="legend-dot choice"></i>Выбор</span><span><i class="legend-dot current"></i>Текущая</span><span><i class="legend-dot visited"></i>Пройдено</span><span><i class="legend-dot review"></i>Есть замечания</span><span><i class="legend-dot end"></i>Концовка</span><span class="muted">Двойной клик по ноде открывает сцену</span><span class="graph-nav-hint">Колесо — зум · средняя кнопка / Space+drag — перемещение</span></footer>
+      <div id="modalBody" class="modal-body"></div>
+      <footer id="modalFooter" class="modal-footer"></footer>
     </div>
-  </dialog>
-
-  <dialog id="validationDialog" class="modal modal-wide">
-    <form method="dialog" class="modal-card">
-      <header class="modal-head"><div><span class="kicker">VALIDATION</span><h2>Проверка сценария</h2></div><button value="cancel" class="icon-btn">×</button></header>
-      <div id="validationDialogBody" class="modal-body"></div>
-      <footer class="modal-footer"><button value="default" class="btn primary">Готово</button></footer>
-    </form>
   </dialog>
 
   <div id="toast" class="toast hidden" role="status"></div>
 
-  <script>
-  // HEARTLINE 2.9.2 hard cache repair: remove caches created by older builds.
-  window.HEARTLINE_BUILD = "2.9.2";
-  if ("caches" in window) {
-    caches.keys().then(keys => Promise.all(keys.filter(k => k.startsWith("heartline-") && !k.includes("2.9.2")).map(k => caches.delete(k)))).catch(()=>{});
-  }
-  </script>
-  <script src="builtin-novel.js?v=20260808-292"></script>
-  <script src="storage.js?v=20260808-292"></script>
-  <script src="parser.js?v=20260808-292"></script>
-  <script src="exporter.js?v=20260808-292"></script>
-  <script src="heartline-app-2100.js"></script>
+  <script>window.HEARTLINE_BUILD='3.0.0';</script>
+  <script src="legacy/parser.js"></script>
+  <script src="legacy/exporter.js"></script>
+  <script type="module" src="app-v300/app.js"></script>
 </body>
 </html>

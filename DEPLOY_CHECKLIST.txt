@@ -1,0 +1,18 @@
+HEARTLINE EDITOR v3.0 — ОБНОВЛЕНИЕ GITHUB PAGES
+
+1. Распаковать UPDATE ZIP.
+2. GitHub → AndrewPetrovich/heartline → Code → Add file → Upload files.
+3. Перетащить ВСЁ содержимое распакованного архива, сохранив папки app-v300 и legacy.
+4. Commit changes в main.
+5. Дождаться GitHub Pages.
+6. Один раз открыть:
+   https://andrewpetrovich.github.io/heartline/upgrade-v300.html
+7. Не очищать IndexedDB / данные сайта вручную.
+
+После перехода HEARTLINE автоматически:
+- создаст новую DB heartline-editor-v3;
+- сохранит старую DB v2 без удаления;
+- перенесёт проекты, версии, замечания, прогресс и GPT-кандидаты;
+- создаст VisualAssignment для каждого отображаемого Fragment.
+
+Старые файлы app.js, styles.css и recovery-*.html можно оставить: index.html v3 их не использует.
