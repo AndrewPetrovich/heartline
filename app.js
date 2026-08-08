@@ -35,6 +35,27 @@ function getNovel(id){return app.novels.find(n=>n.novelId===id)||null}
 function getSessionForVersion(versionId){return app.sessions.find(s=>s.versionId===versionId&&s.sessionId===`session:${versionId}`)||null}
 function versionLabel(v){return v?.label||v?.versionId||'Версия'}
 
+async function reloadCollections(){
+  [app.novels,app.versions,app.sessions,app.candidates,app.cycles]=await Promise.all([
+    DB.getAll('novels'),
+    DB.getAll('versions'),
+    DB.getAll('sessions'),
+    DB.getAll('candidates'),
+    DB.getAll('gptCycles')
+  ]);
+  app.novels.sort((a,b)=>(b.lastOpenedAt||b.createdAt||'').localeCompare(a.lastOpenedAt||a.createdAt||''));
+  app.versions.sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+  if(app.activeNovelId){
+    app.activeNovel=getNovel(app.activeNovelId);
+    if(app.activeNovel){
+      app.activeVersionId=app.activeNovel.activeVersionId;
+      app.activeVersion=getVersion(app.activeVersionId);
+    }else{
+      clearActive();
+    }
+  }
+}
+
 
 function graphTargetsForRaw(raw,ids){const t=String(raw||'').trim().replace(/[.;]+$/,'');if(ids.has(t))return[t];if(/соответствующая маршрутная сцена/i.test(t))return['CH03_SC03_EQUAL','CH03_SC03_FIRE','CH03_SC03_MASK'].filter(x=>ids.has(x));if(/согласно ROUTE_ID/i.test(t))return['CH06_SC04_DIRECT','CH06_SC05_EQUAL','CH06_SC05_FIRE','CH06_SC05_MASK'].filter(x=>ids.has(x));return[]}
 function collectGraphGotos(steps,{skipChoices=false}={}){const out=[];for(const st of steps||[]){if(st.type==='tech'&&st.command==='GOTO')out.push(st.value);if(st.type==='choice'&&!skipChoices)for(const o of st.options||[])out.push(...collectGraphGotos(o.steps||[]));}return out}
