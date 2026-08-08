@@ -1,9 +1,10 @@
-const CACHE='heartline-editor-v3-303-graph-views';
+const CACHE='heartline-editor-v3-304-horizontal-moon';
 const CORE=[
-  './','./index.html','./heartline-v303-app.css','./heartline-v303-app.js','./heartline-v303-graph.js',
-  './heartline-v301-db.js','./heartline-v301-domain.js','./heartline-v301-engine.js',
+  './','./index.html','./heartline-v304-app.css','./heartline-v304-app.js','./heartline-v304-graph.js','./heartline-v304-engine.js',
+  './heartline-v301-db.js','./heartline-v301-domain.js',
   './heartline-v301-assets.js','./heartline-v301-player-renderer.js',
-  './heartline-v301-parser.js','./heartline-v301-exporter.js','./novel.json',
+  './heartline-v301-parser.js','./heartline-v301-exporter.js',
+  './novel.json','./moon-oath.json',
   './manifest.webmanifest','./icon-192.png','./icon-512.png'
 ];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(CORE)).then(()=>self.skipWaiting())));
@@ -13,7 +14,7 @@ self.addEventListener('fetch',event=>{
   const url=new URL(event.request.url);
   if(url.origin!==location.origin)return;
   const isNavigation=event.request.mode==='navigate';
-  const isCore=isNavigation||/heartline-v30[13]-|novel\.json$|manifest\.webmanifest$|icon-(192|512)\.png$/.test(url.pathname);
+  const isCore=isNavigation||/heartline-v30[14]-|(?:novel|moon-oath)\.json$|manifest\.webmanifest$|icon-(192|512)\.png$/.test(url.pathname);
   if(!isCore)return;
   event.respondWith(fetch(event.request).then(response=>{
     if(response.ok){const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy));}
