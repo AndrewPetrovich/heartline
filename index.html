@@ -8,7 +8,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="HEARTLINE" />
-  <title>HEARTLINE Editor 3.2</title>
+  <title>HEARTLINE Editor 3.2.1</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
   <link rel="stylesheet" href="heartline-app.css" />
@@ -25,11 +25,13 @@
         <span class="brand-mark">H</span>
         <span><strong>HEARTLINE</strong><small>Frame &amp; Visual Editor</small></span>
       </button>
+
       <nav id="mainNav" class="main-nav desktop-nav" aria-label="Разделы приложения">
         <button data-route="library" class="nav-button active">Библиотека</button>
         <button data-route="reader" class="nav-button">Читать</button>
         <button data-route="storyboard" class="nav-button">Сториборд</button>
         <button data-route="graph" class="nav-button">Граф</button>
+
         <details class="nav-group">
           <summary>Инструменты</summary>
           <div class="nav-group-menu">
@@ -39,6 +41,7 @@
             <button data-route="gpt" class="nav-button">GPT</button>
           </div>
         </details>
+
         <details class="nav-group">
           <summary>Проект</summary>
           <div class="nav-group-menu">
@@ -47,6 +50,7 @@
           </div>
         </details>
       </nav>
+
       <nav class="mobile-nav" aria-label="Основная мобильная навигация">
         <button data-route="library" class="nav-button active">Библиотека</button>
         <button data-route="reader" class="nav-button">Читать</button>
@@ -54,12 +58,14 @@
         <button data-route="graph" class="nav-button">Граф</button>
         <button id="mobileMoreButton" class="nav-button" type="button">Ещё</button>
       </nav>
+
       <div class="topbar-actions">
         <button id="undoButton" class="icon-button" type="button" title="Отменить" aria-label="Отменить">↶</button>
         <button id="redoButton" class="icon-button" type="button" title="Повторить" aria-label="Повторить">↷</button>
         <button id="installButton" class="button secondary hidden" type="button">Установить</button>
       </div>
     </header>
+
     <main id="view" class="view" tabindex="-1"></main>
   </div>
 
@@ -83,7 +89,7 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
-  <script>window.HEARTLINE_BUILD='3.2.0-graph2-navigation';</script>
+  <script>window.HEARTLINE_BUILD='3.2.1-graph2-hardening';</script>
   <script src="heartline-parser.js"></script>
   <script src="heartline-exporter.js"></script>
   <script type="module" src="heartline-app.js"></script>
