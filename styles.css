@@ -439,3 +439,80 @@ html,body,.app-shell,.route-host{max-width:100%;overflow-x:hidden}
 .graph-ending-jumps{display:flex;align-items:stretch;gap:7px;padding:8px 18px;border-bottom:1px solid #ececec;background:#fff;overflow-x:auto;flex:0 0 auto}.graph-ending-chip{appearance:none;border:1px solid #e1e1e1;background:#fff;border-radius:9px;padding:6px 9px;text-align:left;min-width:125px;cursor:pointer}.graph-ending-chip:hover,.graph-ending-chip.active{border-color:#15936e;background:#f1faf7}.graph-ending-chip span,.graph-ending-chip small{display:block}.graph-ending-chip span{font-size:10px;font-weight:700}.graph-ending-chip small{font-size:8px;color:#777;margin-top:2px}.graph-view-actions{display:flex;gap:6px;align-items:center}.graph-chapter-band{fill:#f7f7f7;stroke:#e5e5e5;stroke-width:1}.graph-chapter-title{font:700 11px Arial,sans-serif;fill:#656565;letter-spacing:.03em}.story-edge.focused{stroke:#15936e;stroke-width:2.6;opacity:1}.story-edge.dim{opacity:.08}.story-node.focused:not(.dim) rect{stroke:#15936e;stroke-width:1.8}.graph-viewport{cursor:grab;touch-action:none}.graph-viewport.panning{cursor:grabbing;user-select:none}.graph-path-summary{display:flex;align-items:baseline;gap:7px;margin:12px 0;padding:10px;border-radius:10px;background:#f4faf8;border:1px solid #d9eee7}.graph-path-summary strong{font-size:22px}.graph-path-summary span{font-size:10px;color:#5f6f69}.graph-inspector-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:12px 0}.graph-inspector-actions .btn{min-width:0}.graph-choice-option{width:100%;font:inherit;color:inherit;text-align:left;background:#fff;cursor:pointer}.graph-choice-option:hover,.graph-choice-option.selected{border-color:#15936e;background:#f1faf7}.graph-choice-option.selected strong{color:#087858}.branch-graph-toolbar{gap:7px}.branch-graph-toolbar .hidden{display:none!important}
 @media(max-width:1100px){.branch-graph-toolbar{align-items:stretch}.graph-view-actions{order:3;flex:1}.graph-view-actions .btn{flex:1}.graph-ending-jumps{padding:7px 10px}.graph-inspector-actions{grid-template-columns:1fr}.graph-ending-chip{min-width:112px}}
 @media(max-width:650px){.branch-graph-head h2{font-size:17px}.branch-graph-toolbar .select{width:100%}.graph-zoom-controls{width:100%;display:grid;grid-template-columns:42px 50px 42px 1fr 54px}.graph-zoom-controls .btn{min-width:0}.graph-ending-jumps{scrollbar-width:none}.graph-ending-jumps::-webkit-scrollbar{display:none}}
+
+/* === v2.9 Mobile-device preview + interaction polish ===================== */
+/* Larger, vertically centered navigation controls. */
+.nav-item{display:inline-flex;align-items:center;justify-content:center;min-height:42px;height:42px;padding:0 16px;line-height:1.15;text-align:center}
+.reader-bottom .center{gap:8px}
+.nav-btn{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 16px;line-height:1.15;text-align:center;white-space:nowrap}
+.reader-bottom .primary-next{min-width:104px}
+
+.reader-preview-switch{display:inline-flex;align-items:center;gap:2px;padding:3px;border:1px solid var(--line);border-radius:10px;background:#f6f6f6;white-space:nowrap}
+.reader-preview-switch>span{padding:0 6px;color:var(--muted);font-size:10px;font-weight:700;letter-spacing:.02em}
+.reader-preview-switch button{display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:#666;font-size:11px;font-weight:700;line-height:1}
+.reader-preview-switch button:hover{background:#fff}
+.reader-preview-switch button.active{background:#fff;color:#111;box-shadow:0 1px 3px rgba(0,0,0,.09)}
+
+.reader-preview-stage.editor-preview,.reader-preview-stage.editor-preview .device-preview-frame,.reader-preview-stage.editor-preview .device-preview-screen{display:contents}
+.reader-preview-stage.editor-preview .device-preview-bezel-top,.reader-preview-stage.editor-preview .device-preview-status,.reader-preview-stage.editor-preview .device-preview-appbar,.reader-preview-stage.editor-preview .device-preview-home{display:none}
+
+.reader-scroll.reader-scroll-phone{padding:18px;background:#f2f3f4;overflow:auto}
+.reader-preview-stage.phone-preview{display:flex;justify-content:center;align-items:flex-start;min-height:100%;padding:8px 0 26px}
+.device-preview-frame{position:relative}
+.reader-preview-stage.phone-preview .device-preview-frame{width:min(390px,calc(100% - 24px));height:min(780px,calc(100dvh - 232px));min-height:570px;padding:13px;border-radius:42px;background:#171717;box-shadow:0 18px 48px rgba(0,0,0,.18);overflow:hidden}
+.reader-preview-stage.phone-preview .device-preview-bezel-top{position:absolute;z-index:5;top:8px;left:50%;width:104px;height:20px;transform:translateX(-50%);border-radius:0 0 13px 13px;background:#171717;display:flex;align-items:center;justify-content:center}
+.device-preview-camera{width:38px;height:5px;border-radius:999px;background:#333}
+.reader-preview-stage.phone-preview .device-preview-screen{height:100%;min-height:0;border-radius:31px;background:#fff;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;overscroll-behavior:contain}
+.reader-preview-stage.phone-preview .device-preview-status{position:sticky;top:0;z-index:4;height:31px;padding:8px 15px 3px;display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.97);font:600 9px/1 Inter,ui-sans-serif,sans-serif}
+.reader-preview-stage.phone-preview .device-preview-status span{font-size:7px;letter-spacing:2px;color:#444}
+.reader-preview-stage.phone-preview .device-preview-appbar{position:sticky;top:31px;z-index:4;display:flex;align-items:center;justify-content:space-between;gap:12px;height:42px;padding:0 14px;border-bottom:1px solid #eee;background:rgba(255,255,255,.97);font-family:Inter,ui-sans-serif,sans-serif}
+.reader-preview-stage.phone-preview .device-preview-appbar span{font-size:9px;font-weight:800;letter-spacing:.08em}.reader-preview-stage.phone-preview .device-preview-appbar strong{max-width:66%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px}
+.reader-preview-stage.phone-preview #readerContent{padding:12px 12px 42px;min-width:0}
+.reader-preview-stage.phone-preview .validation-summary{margin:0 0 10px!important;max-width:none!important}
+.reader-preview-stage.phone-preview .scene-visual{height:132px;margin:0 0 14px;border-radius:13px;padding:12px}
+.reader-preview-stage.phone-preview .scene-visual-copy strong{font-size:13px}.reader-preview-stage.phone-preview .scene-visual-copy span{font-size:9px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.reader-preview-stage.phone-preview .reading-column{width:100%;max-width:none;margin:0}
+.reader-preview-stage.phone-preview .reading-context{gap:8px}
+.reader-preview-stage.phone-preview .fragment{width:100%;max-width:100%;min-width:0;padding:12px 42px 12px 12px;border-radius:11px;font-size:14px;line-height:1.5;overflow:hidden}
+.reader-preview-stage.phone-preview .fragment.active{font-size:16px;line-height:1.54}
+.reader-preview-stage.phone-preview .fragment.context{display:none;font-size:13px;line-height:1.45}.reader-preview-stage.phone-preview .fragment.context:nth-last-child(2){display:block}
+.reader-preview-stage.phone-preview .fragment-actions{top:3px;right:3px;flex-direction:column}.reader-preview-stage.phone-preview .mini-icon{width:34px;height:34px;font-size:15px}
+.reader-preview-stage.phone-preview .speaker{font-family:Inter,ui-sans-serif,sans-serif;font-size:9px;letter-spacing:.08em}
+.reader-preview-stage.phone-preview .choice-box{gap:7px}.reader-preview-stage.phone-preview .choice-btn{padding:10px 11px;font-size:12px;line-height:1.35;white-space:normal}
+.reader-preview-stage.phone-preview .selection-tip{margin:7px 2px 0;font-size:8.5px;line-height:1.35}
+.reader-preview-stage.phone-preview .review-dot,.reader-preview-stage.phone-preview .edited-mark{font-size:8px}
+.reader-preview-stage.phone-preview .device-preview-home{position:absolute;z-index:6;bottom:7px;left:50%;width:118px;height:4px;transform:translateX(-50%);border-radius:999px;background:#4b4b4b}
+
+/* Story Graph: wheel zooms around the cursor; middle mouse or Space+drag pans. */
+.graph-viewport{cursor:default;user-select:none}
+.graph-viewport.space-pan{cursor:grab}.graph-viewport.panning{cursor:grabbing!important}
+.branch-graph-legend .graph-nav-hint{margin-left:auto;color:#5f5f5f;font-weight:600}
+
+@media (min-width:1180px){
+  .main-nav .nav-item,.main-nav .nav-item:nth-child(6){min-height:42px!important;height:42px!important;padding:0 16px!important;font-size:13px!important;line-height:1.15!important;align-items:center!important;justify-content:center!important}
+  .reader-bottom{padding-top:10px!important;padding-bottom:10px!important}
+  .reader-bottom .center{gap:8px!important}
+  .reader-bottom .center .nav-btn,.reader-bottom #replayBtn,.reader-bottom .right .nav-btn{min-height:42px!important;padding:0 16px!important;font-size:13px!important;line-height:1.15!important;align-items:center!important;justify-content:center!important;text-align:center!important}
+  .reader-bottom #replayBtn{min-width:136px!important}
+  .reader-top-actions{gap:8px!important}
+}
+
+@media (max-width:1179px){
+  .reader-preview-switch{order:6;margin-left:auto}
+  .reader-preview-switch>span{display:none}
+}
+@media (max-width:700px){
+  /* On a real phone the normal reader is already the mobile preview. */
+  .reader-preview-switch{display:none!important}
+  .reader-preview-stage.phone-preview,.reader-preview-stage.phone-preview .device-preview-frame,.reader-preview-stage.phone-preview .device-preview-screen{display:contents!important}
+  .reader-preview-stage.phone-preview .device-preview-bezel-top,.reader-preview-stage.phone-preview .device-preview-status,.reader-preview-stage.phone-preview .device-preview-appbar,.reader-preview-stage.phone-preview .device-preview-home{display:none!important}
+  .reader-scroll.reader-scroll-phone{padding:10px 12px 18px;background:#fff;overflow:auto}
+  .reader-preview-stage.phone-preview #readerContent{padding:0}
+}
+@media(max-width:1179px){
+  .nav-btn{min-height:46px}
+}
+@media(max-width:700px){
+  .nav-btn{min-height:48px}
+  .main-nav .nav-item{min-height:48px;height:48px;line-height:1.1}
+}

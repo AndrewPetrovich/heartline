@@ -11,7 +11,7 @@
   <title>HEARTLINE Novel Editor</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20260807-280" />
+  <link rel="stylesheet" href="styles.css?v=20260808-290" />
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -131,10 +131,10 @@
       </div>
       <div id="graphEndingJumps" class="graph-ending-jumps" aria-label="Концовки новеллы"></div>
       <div class="branch-graph-body">
-        <div id="graphViewport" class="graph-viewport"><svg id="branchGraphSvg" class="branch-graph-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
+        <div id="graphViewport" class="graph-viewport" tabindex="0" aria-label="Холст карты ветвлений"><svg id="branchGraphSvg" class="branch-graph-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
         <aside class="graph-inspector"><div class="graph-inspector-head"><strong>Узел</strong><span>Кликните по сцене или выбору</span></div><div id="graphInspectorBody" class="graph-inspector-body"></div></aside>
       </div>
-      <footer class="branch-graph-legend"><span><i class="legend-dot start"></i>Начало</span><span><i class="legend-dot choice"></i>Выбор</span><span><i class="legend-dot current"></i>Текущая</span><span><i class="legend-dot visited"></i>Пройдено</span><span><i class="legend-dot review"></i>Есть замечания</span><span><i class="legend-dot end"></i>Концовка</span><span class="muted">Двойной клик по ноде открывает сцену</span></footer>
+      <footer class="branch-graph-legend"><span><i class="legend-dot start"></i>Начало</span><span><i class="legend-dot choice"></i>Выбор</span><span><i class="legend-dot current"></i>Текущая</span><span><i class="legend-dot visited"></i>Пройдено</span><span><i class="legend-dot review"></i>Есть замечания</span><span><i class="legend-dot end"></i>Концовка</span><span class="muted">Двойной клик по ноде открывает сцену</span><span class="graph-nav-hint">Колесо — зум · средняя кнопка / Space+drag — перемещение</span></footer>
     </div>
   </dialog>
 
@@ -148,10 +148,10 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
-  <script src="builtin-novel.js?v=20260807-280"></script>
-  <script src="storage.js?v=20260807-280"></script>
-  <script src="parser.js?v=20260807-280"></script>
-  <script src="exporter.js?v=20260807-280"></script>
-  <script src="app.js?v=20260807-280"></script>
+  <script src="builtin-novel.js?v=20260808-290"></script>
+  <script src="storage.js?v=20260808-290"></script>
+  <script src="parser.js?v=20260808-290"></script>
+  <script src="exporter.js?v=20260808-290"></script>
+  <script src="app.js?v=20260808-290"></script>
 </body>
 </html>
