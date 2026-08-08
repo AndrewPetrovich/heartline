@@ -71,10 +71,18 @@ export async function importAsset(projectId, file, { source = 'upload' } = {}) {
   let processed = null;
   try { processed = await processImageOffMainThread(file); } catch (_) { processed = null; }
   const hash = processed?.hash || await sha256(file);
-  const existing = (await DB.getAllByIndex('assets', 'sha256', hash)).find(asset => asset.projectId === projectId);
+  const sameHash = await DB.getAllByIndex('assets', 'sha256', hash);
+  const existing = sameHash.find(asset => asset.projectId === projectId);
   if (existing) return { asset: existing, duplicate: true };
   const generated = processed?.width ? { width: processed.width, height: processed.height, thumbWidth: processed.thumbWidth || processed.width, thumbHeight: processed.thumbHeight || processed.height, blob: processed.thumbBuffer ? new Blob([processed.thumbBuffer], { type: processed.thumbType || 'image/webp' }) : file } : await makeThumbnail(file);
-  const assetId = `asset:${hash.slice(0, 20)}`;
+  const legacyAssetId = `asset:${hash.slice(0, 20)}`;
+  const legacyCollision = await DB.get('assets', legacyAssetId);
+  let projectHash = 2166136261;
+  for (const char of String(projectId || 'project')) { projectHash ^= char.charCodeAt(0); projectHash = Math.imul(projectHash, 16777619); }
+  const projectPrefix = (projectHash >>> 0).toString(36);
+  const assetId = legacyCollision && legacyCollision.projectId !== projectId
+    ? `asset:${projectPrefix}:${hash.slice(0, 20)}`
+    : legacyAssetId;
   const asset = {
     assetId,
     projectId,
@@ -160,16 +168,26 @@ export async function copyPreviousAssignment(projectId, scopeId, previousFragmen
 
 export async function assetUsage(projectId, assetId) {
   const assignments = await DB.getAllByIndex('visualAssignments', 'assetId', assetId);
-  return assignments.filter(item => item.projectId === projectId).length;
+  const frameUsage = assignments.filter(item => item.projectId === projectId).length;
+  const project = await DB.get('projects', projectId);
+  return frameUsage + (project?.coverAssetId === assetId ? 1 : 0);
 }
 
 export async function deleteAsset(projectId, assetId, { force = false } = {}) {
-  const usage = await assetUsage(projectId, assetId);
-  if (usage && !force) throw new Error(`Изображение используется в ${usage} кадрах`);
+  const assignments = await DB.getAllByIndex('visualAssignments', 'assetId', assetId);
+  const frameUsage = assignments.filter(item => item.projectId === projectId).length;
+  const project = await DB.get('projects', projectId);
+  const isCover = project?.coverAssetId === assetId;
+  const usage = frameUsage + (isCover ? 1 : 0);
+  if (usage && !force) throw new Error(`Изображение используется: ${frameUsage} кадров${isCover ? ' и обложка проекта' : ''}`);
   if (force) {
-    const assignments = await DB.getAllByIndex('visualAssignments', 'assetId', assetId);
     for (const assignment of assignments.filter(item => item.projectId === projectId)) {
       await DB.put('visualAssignments', { ...assignment, assetId: null, status: 'missing', updatedAt: now() });
+    }
+    if (isCover) {
+      project.coverAssetId = null;
+      project.updatedAt = now();
+      await DB.put('projects', project);
     }
   }
   await DB.del('assets', assetId);

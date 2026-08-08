@@ -52,31 +52,63 @@ export class StoryEngine {
 
   evaluateCondition(expression) {
     const source = String(expression || '').trim().replace(/[.;]+$/, '');
-    let match = source.match(/^([A-Z0-9_]+)\s*=\s*(TRUE|FALSE)$/i);
-    if (match) return this.boolVariable(match[1]) === (match[2].toUpperCase() === 'TRUE');
+    if (!source) return true;
 
-    match = source.match(/^([A-Z0-9_]+)\s+IN\s+(.+)$/i);
-    if (match) {
-      const values = match[2].split(',').map(value => value.trim().replace(/^["']|["']$/g, '').toUpperCase()).filter(Boolean);
-      return values.includes(String(this.variable(match[1]) ?? '').toUpperCase());
+    // Keep the compact legacy IN syntax used by older HEARTLINE projects.
+    const inMatch = source.match(/^([A-Z0-9_]+)\s+IN\s+(.+)$/i);
+    if (inMatch) {
+      const values = inMatch[2].split(',').map(value => value.trim().replace(/^["']|["']$/g, '').toUpperCase()).filter(Boolean);
+      return values.includes(String(this.variable(inMatch[1]) ?? '').toUpperCase());
     }
 
-    match = source.match(/^([A-Z0-9_]+)\s*(>=|<=|>|<|=)\s*(-?\d+)$/i);
-    if (match) {
-      const left = Number(this.variable(match[1]) || 0);
-      const right = Number(match[3]);
-      return ({ '>': left > right, '<': left < right, '>=': left >= right, '<=': left <= right, '=': left === right })[match[2]];
+    const tokenPattern = /\s*(>=|<=|!=|==|&&|\|\||=|>|<|!|\(|\)|"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?|[A-Za-z_][A-Za-z0-9_-]*)/gy;
+    const tokens = [];
+    let index = 0;
+    while (index < source.length) {
+      tokenPattern.lastIndex = index;
+      const match = tokenPattern.exec(source);
+      if (!match || match.index !== index) return true; // unknown editorial syntax: never hide content by accident
+      tokens.push(match[1]);
+      index = tokenPattern.lastIndex;
     }
-
-    match = source.match(/^([A-Z0-9_]+)\s*(!=|=)\s*["']?([A-Z0-9_-]+)["']?$/i);
-    if (match) {
-      const left = String(this.variable(match[1]) ?? '').toUpperCase();
-      const right = String(match[3] || '').toUpperCase();
-      return match[2] === '!=' ? left !== right : left === right;
-    }
-    return true;
+    let cursor = 0;
+    const peek = () => tokens[cursor];
+    const take = value => { if (tokens[cursor] === value) { cursor++; return true; } return false; };
+    const asValue = (token, resolveIdentifier = true) => {
+      if (token == null) return '';
+      if (/^-?\d+(?:\.\d+)?$/.test(token)) return Number(token);
+      if ((token.startsWith('"') && token.endsWith('"')) || (token.startsWith("'") && token.endsWith("'"))) return token.slice(1, -1);
+      if (/^TRUE$/i.test(token)) return true;
+      if (/^FALSE$/i.test(token)) return false;
+      return resolveIdentifier ? this.variable(token) : token;
+    };
+    const truthy = value => value === true || value === 1 || value === '1' || String(value ?? '').toUpperCase() === 'TRUE' || (!!value && String(value).toUpperCase() !== 'FALSE');
+    const compare = (left, op, right) => {
+      if (['>','<','>=','<='].includes(op)) {
+        const a = Number(left || 0), b = Number(right || 0);
+        return op === '>' ? a > b : op === '<' ? a < b : op === '>=' ? a >= b : a <= b;
+      }
+      const numeric = Number.isFinite(Number(left)) && Number.isFinite(Number(right)) && left !== '' && right !== '';
+      const a = numeric ? Number(left) : String(left ?? '').toUpperCase();
+      const b = numeric ? Number(right) : String(right ?? '').toUpperCase();
+      return op === '!=' ? a !== b : a === b;
+    };
+    const parsePrimary = () => {
+      if (take('(')) { const value = parseOr(); take(')'); return value; }
+      const token = tokens[cursor++];
+      const left = asValue(token, true);
+      const op = peek();
+      if (['=','==','!=','>','<','>=','<='].includes(op)) {
+        cursor++;
+        return compare(left, op, asValue(tokens[cursor++], false));
+      }
+      return truthy(left);
+    };
+    const parseUnary = () => take('!') ? !parseUnary() : parsePrimary();
+    const parseAnd = () => { let value = parseUnary(); while (take('&&')) value = Boolean(value && parseUnary()); return value; };
+    const parseOr = () => { let value = parseAnd(); while (take('||')) value = Boolean(value || parseAnd()); return value; };
+    try { return Boolean(parseOr()); } catch (_) { return true; }
   }
-
   computeIfScope(steps, index) {
     const hardCommands = new Set(['BG', 'MUSIC', 'SFX', 'SPRITE', 'CG', 'FADE', 'GOTO', 'CHOICE', 'SYSTEM', 'REACTION']);
     let hardEnd = steps.length;

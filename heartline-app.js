@@ -5,6 +5,7 @@ import { StoryEngine, createSession } from './heartline-engine.js';
 import * as Assets from './heartline-assets.js';
 import { DEVICE_PRESETS, renderPlayerFrame, renderDeviceComparison, orientedDevice } from './heartline-player-renderer.js';
 import { buildGraph, layoutGraph, renderGraph, renderGraphOutline, renderGraphMinimap, enableGraphNavigation } from './heartline-graph.js';
+import * as ProjectStats from './heartline-project-stats.js';
 
 const $ = id => document.getElementById(id);
 const view = $('view');
@@ -48,6 +49,10 @@ const state = {
   readerFont: INITIAL_READER_PREFS.font,
   readerColumnWidth: INITIAL_READER_PREFS.columnWidth,
   readerFocus: INITIAL_READER_PREFS.focus,
+  libraryQuery: '',
+  libraryView: 'active',
+  librarySort: 'updated',
+  librarySearchTimer: null,
   storyboardFilter: 'all',
   storyboardSelection: new Set(),
   storyboardLimit: 60,
@@ -100,6 +105,7 @@ async function setRoute(route) {
   document.body.classList.toggle('reader-active', route === 'reader');
   setActiveNav(route);
   await render();
+  if (state.project && route !== 'library') await rememberProjectLocation(route);
   view.focus({ preventScroll: true });
 }
 
@@ -134,6 +140,22 @@ function selectedScene() {
   return sceneById(state.selectedSceneId || frame?.sceneId || currentContent()?.startScene);
 }
 
+async function touchProject({ modified = true } = {}) {
+  if (!state.project) return;
+  if (modified) state.project.updatedAt = Domain.now();
+  state.project.lastOpenedAt = state.project.lastOpenedAt || Domain.now();
+  await DB.put('projects', state.project);
+}
+
+async function rememberProjectLocation(route = state.route) {
+  if (!state.project || route === 'library') return;
+  state.project.lastRoute = route;
+  state.project.lastFragmentId = state.selectedFragmentId || state.project.lastFragmentId || null;
+  state.project.lastSceneId = state.selectedSceneId || state.project.lastSceneId || null;
+  state.project.lastOpenedAt = Domain.now();
+  await DB.put('projects', state.project);
+}
+
 async function loadCollections() {
   state.projects = (await DB.getAll('projects')).sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
   state.storage = await DB.storageEstimate();
@@ -141,77 +163,143 @@ async function loadCollections() {
 
 async function ensureBuiltinProjects() {
   const builtins = [
-    { file: './novel.json', fallbackId: 'poslednyaya-podacha', sourceType: 'builtin' },
-    { file: './moon-oath.json', fallbackId: 'moon_oath', sourceType: 'builtin-moon-oath' }
+    { file: './novel.json', stableId: 'poslednyaya-podacha', aliases: ['poslednyaya-podacha-heartline-branching2-20260808'], sourceType: 'builtin-poslednyaya-podacha' },
+    { file: './moon-oath.json', stableId: 'moon_oath', aliases: [], sourceType: 'builtin-moon-oath' }
   ];
-  const existing = new Map((await DB.getAll('projects')).map(project => [project.projectId, project]));
+  const projects = await DB.getAll('projects');
 
   for (const builtin of builtins) {
     let response;
-    try {
-      response = await fetch(builtin.file, { cache: 'no-store' });
-    } catch (error) {
-      console.warn(`Не удалось загрузить встроенный проект ${builtin.file}`, error);
-      continue;
-    }
-    if (!response.ok) {
-      console.warn(`Встроенный проект недоступен: ${builtin.file}`);
-      continue;
-    }
+    try { response = await fetch(builtin.file, { cache: 'no-store' }); }
+    catch (error) { console.warn(`Не удалось загрузить встроенный проект ${builtin.file}`, error); continue; }
+    if (!response.ok) { console.warn(`Встроенный проект недоступен: ${builtin.file}`); continue; }
 
     const content = parser.normalizeNovel(await response.json());
-    const projectId = content.id || builtin.fallbackId;
-    if (existing.has(projectId)) continue;
+    const sourceVersion = content.contentVersion || `builtin-${window.HEARTLINE_BUILD || 'current'}`;
+    let project = projects.find(item => item.projectId === builtin.stableId)
+      || projects.find(item => builtin.aliases.includes(item.projectId))
+      || projects.find(item => item.builtin && item.title === content.title)
+      || null;
+    const projectId = project?.projectId || builtin.stableId;
+    content.id = projectId;
+    const versionId = `${projectId}::builtin-${Domain.slug(sourceVersion)}`;
+    const existingVersion = await DB.get('versions', versionId);
 
-    const versionId = `${projectId}::${Domain.slug(content.contentVersion || 'builtin')}`;
-    const createdAt = Domain.now();
-    const validation = parser.validateNovel(content);
-    const project = {
-      projectId,
-      title: content.title,
-      activeVersionId: versionId,
-      createdAt,
-      updatedAt: createdAt,
-      builtin: true
-    };
-    const version = {
-      versionId,
-      projectId,
-      label: content.contentVersion || 'Встроенная редакция',
-      parentVersionId: null,
-      sourceType: builtin.sourceType,
-      createdAt,
-      updatedAt: createdAt,
-      content,
-      validation: {
-        ok: validation.ok,
-        errors: validation.errors,
-        warnings: validation.warnings,
-        stats: validation.stats
+    if (!project) {
+      const createdAt = Domain.now();
+      const validation = parser.validateNovel(content);
+      project = {
+        projectId,
+        title: content.title,
+        activeVersionId: versionId,
+        createdAt,
+        updatedAt: createdAt,
+        builtin: true,
+        builtinSourceVersion: sourceVersion,
+        lastRoute: 'reader'
+      };
+      const version = {
+        versionId, projectId, label: sourceVersion, parentVersionId: null,
+        sourceType: builtin.sourceType, createdAt, updatedAt: createdAt, content,
+        validation: { ok: validation.ok, errors: validation.errors, warnings: validation.warnings, stats: validation.stats }
+      };
+      await DB.put('projects', project);
+      await DB.put('versions', version);
+      await DB.put('workspaceDrafts', { projectId, baseVersionId: versionId, textEdits: {}, selectedFragmentId: null, selectedSceneId: content.startScene, undoStack: [], redoStack: [], dirty: false, updatedAt: createdAt });
+      await DB.ensureVisualAssignments(projectId, DB.versionScope(versionId), content);
+      await DB.ensureVisualAssignments(projectId, DB.workspaceScope(projectId), content);
+      await DB.put('sessions', createSession(projectId, versionId, content));
+      projects.push(project);
+      continue;
+    }
+
+    // Do nothing if this exact built-in edition has already been activated.
+    if (project.builtinSourceVersion === sourceVersion && existingVersion) continue;
+
+    const oldVersion = await DB.get('versions', project.activeVersionId);
+    const oldWorkspace = await DB.get('workspaceDrafts', projectId);
+    const oldWorkspaceScope = DB.workspaceScope(projectId);
+    const oldAssignments = await DB.getAllByIndex('visualAssignments', 'scopeId', oldWorkspaceScope);
+    const oldByFragment = new Map(oldAssignments.map(item => [item.fragmentId, item]));
+
+    // Preserve unsaved human text work as a real version before switching the built-in source.
+    let parentVersionId = project.activeVersionId || null;
+    if (oldVersion?.content && oldWorkspace?.dirty && Object.keys(oldWorkspace.textEdits || {}).length) {
+      const stamp = Date.now().toString(36);
+      const autosaveId = `${projectId}::autosave-before-${Domain.slug(sourceVersion)}-${stamp}`;
+      const autosaveContent = Domain.applyTextEditsToContent(oldVersion.content, oldWorkspace.textEdits || {});
+      const autosaveValidation = parser.validateNovel(autosaveContent);
+      await DB.put('versions', {
+        versionId: autosaveId, projectId, label: `Автосохранение перед ${sourceVersion}`,
+        parentVersionId: oldVersion.versionId, sourceType: 'builtin-upgrade-autosave', note: 'Создано автоматически перед обновлением встроенного сценария.',
+        createdAt: Domain.now(), updatedAt: Domain.now(), content: autosaveContent,
+        validation: { ok: autosaveValidation.ok, errors: autosaveValidation.errors, warnings: autosaveValidation.warnings, stats: autosaveValidation.stats }
+      });
+      await DB.cloneVisualScope(projectId, oldWorkspaceScope, DB.versionScope(autosaveId));
+      parentVersionId = autosaveId;
+    }
+
+    if (!existingVersion) {
+      const validation = parser.validateNovel(content);
+      await DB.put('versions', {
+        versionId, projectId, label: sourceVersion, parentVersionId,
+        sourceType: `${builtin.sourceType}-update`, createdAt: Domain.now(), updatedAt: Domain.now(), content,
+        validation: { ok: validation.ok, errors: validation.errors, warnings: validation.warnings, stats: validation.stats }
+      });
+    }
+
+    // Build fresh visual scopes, then carry over visual work where Fragment IDs survived the source update.
+    await DB.deleteByIndex('visualAssignments', 'scopeId', DB.versionScope(versionId));
+    await DB.deleteByIndex('visualAssignments', 'scopeId', oldWorkspaceScope);
+    let workspaceAssignments = await DB.ensureVisualAssignments(projectId, oldWorkspaceScope, content);
+    workspaceAssignments = workspaceAssignments.map(item => {
+      const previous = oldByFragment.get(item.fragmentId);
+      if (!previous?.assetId) return item;
+      return {
+        ...item,
+        assetId: previous.assetId,
+        fit: previous.fit || item.fit,
+        focalPoint: previous.focalPoint || item.focalPoint,
+        zoom: previous.zoom || item.zoom,
+        overlayOpacity: previous.overlayOpacity ?? item.overlayOpacity,
+        deviceOverrides: Domain.clone(previous.deviceOverrides || {}),
+        status: previous.status === 'approved' ? 'needs-review' : (previous.status || 'draft'),
+        updatedAt: Domain.now()
+      };
+    });
+    for (let index = 0; index < workspaceAssignments.length; index += 500) await DB.putMany('visualAssignments', workspaceAssignments.slice(index, index + 500));
+    await DB.cloneVisualScope(projectId, oldWorkspaceScope, DB.versionScope(versionId));
+
+    const frameIds = new Set(Domain.flattenFrames(content).map(frame => frame.fragmentId));
+    const sourceReviews = await DB.getAllByIndex('reviews', 'projectId', projectId);
+    for (const review of sourceReviews) {
+      if (review.fragmentId && !frameIds.has(review.fragmentId) && !Domain.CLOSED_REVIEW_STATUSES.has(review.status)) {
+        review.status = 'Архив';
+        review.archivedReason = `Фрагмент отсутствует в ${sourceVersion}`;
+        review.updatedAt = Domain.now();
+        await DB.put('reviews', review);
       }
-    };
-    const workspace = {
-      projectId,
-      baseVersionId: versionId,
-      textEdits: {},
-      selectedFragmentId: null,
-      selectedSceneId: content.startScene,
-      undoStack: [],
-      redoStack: [],
-      dirty: false,
-      updatedAt: createdAt
-    };
+    }
+    const selectedFragmentId = frameIds.has(oldWorkspace?.selectedFragmentId) ? oldWorkspace.selectedFragmentId : null;
+    const selectedSceneId = content.scenes.some(scene => scene.id === oldWorkspace?.selectedSceneId) ? oldWorkspace.selectedSceneId : content.startScene;
+    await DB.put('workspaceDrafts', {
+      projectId, baseVersionId: versionId, textEdits: {}, selectedFragmentId, selectedSceneId,
+      undoStack: [], redoStack: [], dirty: false, updatedAt: Domain.now()
+    });
+    await DB.put('sessions', createSession(projectId, versionId, content));
 
-    await DB.putMany('projects', [project]);
-    await DB.putMany('versions', [version]);
-    await DB.put('workspaceDrafts', workspace);
-    await DB.ensureVisualAssignments(projectId, DB.versionScope(versionId), content);
-    await DB.ensureVisualAssignments(projectId, DB.workspaceScope(projectId), content);
-    existing.set(projectId, project);
+    project.title = content.title;
+    project.activeVersionId = versionId;
+    project.builtin = true;
+    project.builtinSourceVersion = sourceVersion;
+    project.statistics = null;
+    project.updatedAt = Domain.now();
+    project.lastFragmentId = selectedFragmentId;
+    project.lastSceneId = selectedSceneId;
+    await DB.put('projects', project);
   }
 }
-
-async function openProject(projectId, { route = 'reader' } = {}) {
+async function openProject(projectId, { route = null } = {}) {
   const project = await DB.get('projects', projectId);
   if (!project) throw new Error('Проект не найден');
   state.project = project;
@@ -230,8 +318,8 @@ async function openProject(projectId, { route = 'reader' } = {}) {
   state.reviews = await DB.getAllByIndex('reviews', 'projectId', projectId);
   state.assets = await DB.getAllByIndex('assets', 'projectId', projectId);
   state.assetMap = new Map(state.assets.map(asset => [asset.assetId, asset]));
-  state.selectedFragmentId = workspace.selectedFragmentId;
-  state.selectedSceneId = workspace.selectedSceneId || state.version.content.startScene;
+  state.selectedFragmentId = workspace.selectedFragmentId || project.lastFragmentId || null;
+  state.selectedSceneId = workspace.selectedSceneId || project.lastSceneId || state.version.content.startScene;
   let session = (await DB.getAllByIndex('sessions', 'versionId', state.version.versionId)).find(item => item.sessionId === `session:${projectId}:${state.version.versionId}`);
   if (!session) {
     session = createSession(projectId, state.version.versionId, state.version.content);
@@ -245,10 +333,11 @@ async function openProject(projectId, { route = 'reader' } = {}) {
     state.selectedFragmentId = entry?.fragmentId || Domain.flattenFrames(state.version.content)[0]?.fragmentId || null;
   }
   state.directFragmentId = null;
-  state.project.updatedAt = Domain.now();
+  state.project.lastOpenedAt = Domain.now();
   await DB.put('projects', state.project);
   await persistWorkspaceSelection();
-  await setRoute(route);
+  const targetRoute = route || state.project.lastRoute || 'reader';
+  await setRoute(targetRoute);
 }
 
 async function refreshProjectData({ keepSelection = true } = {}) {
@@ -274,6 +363,12 @@ async function persistWorkspaceSelection() {
   state.workspace.selectedSceneId = frame?.sceneId || state.selectedSceneId;
   state.workspace.updatedAt = Domain.now();
   await DB.put('workspaceDrafts', state.workspace);
+  if (state.project) {
+    state.project.lastFragmentId = state.selectedFragmentId || state.project.lastFragmentId || null;
+    state.project.lastSceneId = state.workspace.selectedSceneId || state.project.lastSceneId || null;
+    state.project.lastOpenedAt = Domain.now();
+    await DB.put('projects', state.project);
+  }
 }
 
 function activeEntry() {
@@ -325,6 +420,7 @@ async function changeText(fragmentId, text) {
     if (assignmentIndex >= 0) state.assignments[assignmentIndex] = updated;
   }
   await DB.put('changeEvents', { eventId: Domain.uid('change'), projectId: state.project.projectId, fragmentId, kind: 'text', before, after: text, createdAt: Domain.now() });
+  await touchProject();
   toast('Текст сохранён. Утверждённый визуал переведён в проверку.');
   await refreshActiveRoute({ resetReaderScroll: false });
 }
@@ -338,6 +434,7 @@ async function applyAssignmentChange(fragmentId, after, historyLabel = 'visual')
   const index = state.assignments.findIndex(item => item.fragmentId === fragmentId);
   if (index >= 0) state.assignments[index] = after; else state.assignments.push(after);
   await DB.put('changeEvents', { eventId: Domain.uid('change'), projectId: state.project.projectId, fragmentId, kind: 'visual', before, after, createdAt: Domain.now() });
+  await touchProject();
 }
 
 async function undo() {
@@ -425,6 +522,7 @@ function openReviewForm({ fragmentId = state.selectedFragmentId, targetType = 't
     };
     await DB.put('reviews', review);
     state.reviews.push(review);
+    await touchProject();
     closeModal();
     toast('Замечание сохранено');
     await refreshActiveRoute({ resetReaderScroll: false });
@@ -437,7 +535,8 @@ async function updateReviewStatus(reviewId, status, { rerender = true } = {}) {
   review.status = status;
   review.updatedAt = Domain.now();
   await DB.put('reviews', review);
-  await refreshActiveRoute({ resetReaderScroll: false });
+  await touchProject();
+  if (rerender) await refreshActiveRoute({ resetReaderScroll: false });
 }
 
 async function hydrateImages(root = document) {
@@ -478,33 +577,394 @@ function applyReaderPreferences() {
   shell.classList.toggle('reader-focus', Boolean(state.readerFocus));
 }
 
-async function projectLibraryMetrics(project) {
+function projectMetricIcon(kind) {
+  const paths = {
+    frames: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 16l4-4 3 3 2-2 3 3"/><circle cx="8" cy="9" r="1.5"/>',
+    choices: '<circle cx="6" cy="5" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="18" cy="17" r="2"/><path d="M8 5h3a4 4 0 014 4v0M8 5h3a4 4 0 014 4v4a4 4 0 003 4"/>',
+    endings: '<path d="M12 21s-7-4.35-7-10a4 4 0 017-2.65A4 4 0 0119 11c0 5.65-7 10-7 10z"/>',
+    branches: '<circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/><path d="M7 12h3a4 4 0 004-4V5M10 12h1a4 4 0 014 4v3"/>',
+    words: '<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+    unique: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 010 18V3z"/>'
+  };
+  return `<svg class="project-stat-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${paths[kind] || paths.frames}</svg>`;
+}
+
+function routeLabel(route) {
+  return ({ reader: 'Читать', storyboard: 'Сториборд', assets: 'Изображения', preview: 'Превью', reviews: 'Замечания', versions: 'Версии', gpt: 'GPT', graph: 'Граф', export: 'Экспорт' })[route] || 'Читать';
+}
+
+function projectCoverPlaceholder(title) {
+  const safe = Domain.escapeHtml(title || 'HEARTLINE');
+  return `<div class="project-cover-placeholder"><span>HEARTLINE</span><strong>${safe}</strong></div>`;
+}
+
+async function hydrateLibraryCovers(root = view) {
+  const nodes = [...root.querySelectorAll('[data-cover-asset]')];
+  await Promise.all(nodes.map(async node => {
+    const assetId = node.dataset.coverAsset;
+    if (!assetId) return;
+    const url = await Assets.assetObjectUrl(assetId, { thumbnail: false });
+    if (url) node.src = url;
+  }));
+}
+
+async function projectLibrarySnapshot(project) {
   try {
-    const [version, workspace, assignments, reviews] = await Promise.all([DB.get('versions', project.activeVersionId), DB.get('workspaceDrafts', project.projectId), DB.getAllByIndex('visualAssignments', 'scopeId', DB.workspaceScope(project.projectId)), DB.getAllByIndex('reviews', 'projectId', project.projectId)]);
+    const [version, workspace, assignments, reviews] = await Promise.all([
+      DB.get('versions', project.activeVersionId),
+      DB.get('workspaceDrafts', project.projectId),
+      DB.getAllByIndex('visualAssignments', 'scopeId', DB.workspaceScope(project.projectId)),
+      DB.getAllByIndex('reviews', 'projectId', project.projectId)
+    ]);
     if (!version?.content) return null;
-    return Domain.projectMetrics(version.content, workspace || { textEdits: {} }, assignments, reviews);
-  } catch (_) { return null; }
+    const effectiveWorkspace = workspace || { textEdits: {} };
+    const cacheKey = ProjectStats.statisticsCacheKey(version.versionId, effectiveWorkspace.textEdits || {});
+    let statistics = project.statistics?.cacheKey === cacheKey ? project.statistics.data : null;
+    if (!statistics) {
+      statistics = ProjectStats.calculateProjectStatistics(version.content, effectiveWorkspace.textEdits || {});
+      project.statistics = { cacheKey, data: statistics, calculatedAt: Domain.now() };
+      await DB.put('projects', project);
+    }
+    const production = Domain.projectMetrics(version.content, effectiveWorkspace, assignments, reviews);
+    return {
+      version,
+      workspace: effectiveWorkspace,
+      statistics,
+      production,
+      validation: version.validation || parser.validateNovel(version.content)
+    };
+  } catch (error) {
+    console.warn('Project statistics:', project.projectId, error);
+    return null;
+  }
+}
+
+function projectStatTile(kind, label, value, secondary = '', title = '') {
+  return `<div class="project-stat-tile" ${title ? `title="${Domain.escapeHtml(title)}"` : ''}>
+    <div class="project-stat-label">${projectMetricIcon(kind)}<span>${Domain.escapeHtml(label)}</span></div>
+    <strong>${value}</strong>
+    ${secondary ? `<small>${secondary}</small>` : '<small>&nbsp;</small>'}
+  </div>`;
+}
+
+function projectCardHtml(project, snapshot) {
+  const stats = snapshot?.statistics;
+  const prod = snapshot?.production;
+  const validation = snapshot?.validation;
+  const reading = stats?.readingTime ? `≈ ${stats.readingTime.min}–${stats.readingTime.max} мин` : '≈ — мин';
+  const choiceSecondary = stats ? `${ProjectStats.formatInteger(stats.choices.significant)} значимых` : '—';
+  const endingSecondary = stats?.endings?.total
+    ? (stats.endings.secret ? `${ProjectStats.formatInteger(stats.endings.main || 0)} осн. / ${ProjectStats.formatInteger(stats.endings.secret)} секр.` : 'по структуре')
+    : '—';
+  const uniqueTitle = stats ? `Общий контент: ${100 - stats.uniqueContentPercent}% · уникальный: ${stats.uniqueContentPercent}%` : '';
+  const continueRoute = project.lastRoute && project.lastRoute !== 'library' ? project.lastRoute : 'reader';
+  const cover = project.coverAssetId
+    ? `<img class="project-cover-image" data-cover-asset="${Domain.escapeHtml(project.coverAssetId)}" alt="Обложка ${Domain.escapeHtml(project.title)}">`
+    : projectCoverPlaceholder(project.title);
+  return `<article class="card project-card project-card-rich" data-project-card="${Domain.escapeHtml(project.projectId)}" tabindex="0">
+    <div class="project-cover">${cover}</div>
+    <div class="project-card-rich-body">
+      <header class="project-card-rich-head">
+        <div><span class="kicker">ПРОЕКТ</span><h2>${Domain.escapeHtml(project.title)}</h2></div>
+        <button class="project-menu-button" data-project-menu="${Domain.escapeHtml(project.projectId)}" type="button" aria-label="Меню проекта">•••</button>
+      </header>
+      <div class="project-version-row">
+        <span class="project-version" title="${Domain.escapeHtml(project.activeVersionId)}">${Domain.escapeHtml(project.activeVersionId)}</span>
+        <time>${Domain.formatDate(project.updatedAt || project.createdAt)}</time>
+      </div>
+      <div class="project-summary-row">
+        <span>${reading}</span><i></i><span>${stats ? ProjectStats.formatInteger(stats.chapters) : '—'} глав</span><i></i><span>${stats ? ProjectStats.formatInteger(stats.scenes) : '—'} сцен</span>
+        ${validation && validation.ok === false ? '<span class="status-badge missing">Структура требует проверки</span>' : ''}
+      </div>
+      <div class="project-stats-grid">
+        ${projectStatTile('frames', 'Кадры', stats ? ProjectStats.formatInteger(stats.frames) : '—')}
+        ${projectStatTile('choices', 'Выборы', stats ? ProjectStats.formatInteger(stats.choices.options) : '—', choiceSecondary, stats ? `Choice-нод: ${stats.choices.choiceNodes} · косметических: ${stats.choices.flavor}` : '')}
+        ${projectStatTile('endings', 'Концовки', stats ? ProjectStats.formatInteger(stats.endings.total) : '—', endingSecondary)}
+        ${projectStatTile('branches', 'Ветвления', stats ? ProjectStats.formatInteger(stats.branches) : '—', 'сюжетных точек')}
+        ${projectStatTile('words', 'Слов в сценарии', stats ? ProjectStats.formatInteger(stats.words) : '—')}
+        ${projectStatTile('unique', 'Уникальный контент', stats ? `${stats.uniqueContentPercent}%` : '—', 'от всего объёма', uniqueTitle)}
+      </div>
+      ${prod ? `<div class="project-production-row"><div><span>Визуалы</span><b>${prod.assignedPercent}%</b></div><div class="progress"><span style="width:${prod.assignedPercent}%"></span></div><div><span>Замечания</span><b>${prod.openReviews}</b></div></div>` : ''}
+      <footer class="project-card-rich-foot">
+        <span class="muted">Продолжить: ${Domain.escapeHtml(routeLabel(continueRoute))}</span>
+        <button class="button primary" data-open-project="${Domain.escapeHtml(project.projectId)}">Продолжить</button>
+      </footer>
+    </div>
+  </article>`;
+}
+
+async function handleProjectCover(file) {
+  const projectId = $('coverInput')?.dataset.projectId;
+  if (!file || !projectId) return;
+  try {
+    toast('Загружаю обложку…', 5000);
+    const result = await Assets.importAsset(projectId, file, { source: 'project-cover' });
+    const project = await DB.get('projects', projectId);
+    if (!project) throw new Error('Проект не найден');
+    project.coverAssetId = result.asset.assetId;
+    project.updatedAt = Domain.now();
+    await DB.put('projects', project);
+    await loadCollections();
+    toast('Обложка проекта обновлена');
+    await renderLibrary();
+  } catch (error) { toast(error.message, 5000); }
+}
+
+async function renameLibraryProject(projectId) {
+  const project = await DB.get('projects', projectId);
+  if (!project) return;
+  const title = prompt('Название проекта', project.title || '');
+  if (!title?.trim()) return;
+  project.title = title.trim();
+  project.updatedAt = Domain.now();
+  await DB.put('projects', project);
+  await loadCollections();
+  renderLibrary();
+}
+
+async function archiveLibraryProject(projectId, archived) {
+  const project = await DB.get('projects', projectId);
+  if (!project) return;
+  project.archived = archived;
+  project.updatedAt = Domain.now();
+  await DB.put('projects', project);
+  await loadCollections();
+  renderLibrary();
+}
+
+async function duplicateLibraryProject(projectId) {
+  const sourceProject = await DB.get('projects', projectId);
+  const sourceVersion = sourceProject ? await DB.get('versions', sourceProject.activeVersionId) : null;
+  const sourceWorkspace = sourceProject ? await DB.get('workspaceDrafts', projectId) : null;
+  if (!sourceProject || !sourceVersion) return toast('Не удалось прочитать проект');
+  toast('Создаю копию проекта…', 7000);
+  const suffix = Date.now().toString(36);
+  const newProjectId = `${Domain.slug(sourceProject.title)}-copy-${suffix}`;
+  const newVersionId = `${newProjectId}::copy-${suffix}`;
+  const content = Domain.applyTextEditsToContent(sourceVersion.content, sourceWorkspace?.textEdits || {});
+  content.id = newProjectId;
+  const now = Domain.now();
+  const project = { projectId: newProjectId, title: `${sourceProject.title} — копия`, activeVersionId: newVersionId, createdAt: now, updatedAt: now, lastRoute: 'reader' };
+  const version = { versionId: newVersionId, projectId: newProjectId, label: 'Копия проекта', parentVersionId: null, sourceType: 'duplicate-project', createdAt: now, updatedAt: now, content, validation: parser.validateNovel(content) };
+  await DB.put('projects', project);
+  await DB.put('versions', version);
+  await DB.put('workspaceDrafts', { projectId: newProjectId, baseVersionId: newVersionId, textEdits: {}, selectedFragmentId: sourceWorkspace?.selectedFragmentId || null, selectedSceneId: sourceWorkspace?.selectedSceneId || content.startScene, undoStack: [], redoStack: [], dirty: false, updatedAt: now });
+
+  const assetMap = new Map();
+  const sourceAssets = await DB.getAllByIndex('assets', 'projectId', projectId);
+  for (const asset of sourceAssets) {
+    if (!asset.blob) continue;
+    const file = new File([asset.blob], asset.name || 'asset', { type: asset.mimeType || asset.blob.type || 'image/webp' });
+    const imported = await Assets.importAsset(newProjectId, file, { source: 'project-duplicate' });
+    assetMap.set(asset.assetId, imported.asset.assetId);
+  }
+
+  const sourceAssignments = await DB.getAllByIndex('visualAssignments', 'scopeId', DB.workspaceScope(projectId));
+  const newScope = DB.workspaceScope(newProjectId);
+  const copiedAssignments = sourceAssignments.map(item => ({ ...Domain.clone(item), projectId: newProjectId, scopeId: newScope, assignmentId: DB.visualAssignmentId(newScope, item.fragmentId), assetId: assetMap.get(item.assetId) || null, status: item.assetId && assetMap.get(item.assetId) ? (item.status || 'draft') : 'missing', updatedAt: now }));
+  for (let i = 0; i < copiedAssignments.length; i += 500) await DB.putMany('visualAssignments', copiedAssignments.slice(i, i + 500));
+  await DB.ensureVisualAssignments(newProjectId, newScope, content);
+  await DB.cloneVisualScope(newProjectId, newScope, DB.versionScope(newVersionId));
+
+  const sourceReviews = await DB.getAllByIndex('reviews', 'projectId', projectId);
+  if (sourceReviews.length) {
+    await DB.putMany('reviews', sourceReviews.map(review => ({ ...Domain.clone(review), reviewId: Domain.uid('review'), projectId: newProjectId, versionId: newVersionId, visualId: review.fragmentId ? DB.visualAssignmentId(newScope, review.fragmentId) : null, createdAt: now, updatedAt: now })));
+  }
+  project.coverAssetId = assetMap.get(sourceProject.coverAssetId) || null;
+  await DB.put('projects', project);
+  await loadCollections();
+  toast('Копия проекта создана');
+  renderLibrary();
+}
+
+async function deleteLibraryProject(projectId) {
+  const project = await DB.get('projects', projectId);
+  if (!project) return;
+  if (!confirm(`Удалить проект «${project.title}» и все его локальные данные? Это действие нельзя отменить.`)) return;
+  const assets = await DB.getAllByIndex('assets', 'projectId', projectId);
+  for (const asset of assets) {
+    await DB.del('assetThumbnails', asset.assetId);
+    await DB.del('assets', asset.assetId);
+    Assets.revokeAssetUrl(asset.assetId);
+  }
+  for (const [store, index] of [
+    ['versions','projectId'], ['sessions','projectId'], ['reviews','projectId'], ['visualAssignments','projectId'],
+    ['gptCandidates','projectId'], ['gptCycles','projectId'], ['changeEvents','projectId'], ['runtimeBuilds','projectId']
+  ]) await DB.deleteByIndex(store, index, projectId);
+  await DB.del('workspaceDrafts', projectId);
+  await DB.del('projects', projectId);
+  if (state.project?.projectId === projectId) {
+    state.project = null; state.version = null; state.workspace = null; state.session = null; state.engine = null;
+  }
+  await loadCollections();
+  toast('Проект удалён');
+  renderLibrary();
+}
+
+async function openLibraryProjectMenu(projectId) {
+  const project = await DB.get('projects', projectId);
+  if (!project) return;
+  openModal({
+    kicker: 'ПРОЕКТ',
+    title: project.title,
+    body: `<div class="project-menu-grid">
+      <button class="button primary" data-project-action="open">Открыть проект</button>
+      <button class="button secondary" data-project-action="cover">Заменить обложку</button>
+      ${project.coverAssetId ? '<button class="button secondary" data-project-action="remove-cover">Убрать обложку</button>' : ''}
+      <button class="button secondary" data-project-action="rename">Переименовать</button>
+      <button class="button secondary" data-project-action="duplicate">Дублировать</button>
+      <button class="button secondary" data-project-action="export">Экспорт Project ZIP</button>
+      <button class="button secondary" data-project-action="archive">${project.archived ? 'Вернуть из архива' : 'Архивировать'}</button>
+      <button class="button danger" data-project-action="delete">Удалить проект</button>
+    </div>`,
+    footer: '<button id="projectMenuClose" class="button secondary">Закрыть</button>'
+  });
+  $('projectMenuClose').onclick = closeModal;
+  $('modalBody').querySelectorAll('[data-project-action]').forEach(button => button.onclick = async () => {
+    const action = button.dataset.projectAction;
+    if (action === 'open') { closeModal(); return openProject(projectId); }
+    if (action === 'cover') { closeModal(); $('coverInput').dataset.projectId = projectId; $('coverInput').value = ''; return $('coverInput').click(); }
+    if (action === 'remove-cover') { project.coverAssetId = null; project.updatedAt = Domain.now(); await DB.put('projects', project); closeModal(); await loadCollections(); return renderLibrary(); }
+    if (action === 'rename') { closeModal(); return renameLibraryProject(projectId); }
+    if (action === 'duplicate') { closeModal(); return duplicateLibraryProject(projectId); }
+    if (action === 'archive') { closeModal(); return archiveLibraryProject(projectId, !project.archived); }
+    if (action === 'delete') { closeModal(); return deleteLibraryProject(projectId); }
+    if (action === 'export') {
+      closeModal();
+      await openProject(projectId, { route: 'library' });
+      await exportProjectZip();
+      return renderLibrary();
+    }
+  });
 }
 
 async function renderLibrary() {
   await loadCollections();
-  const dashboard = new Map();
-  await Promise.all(state.projects.map(async project => dashboard.set(project.projectId, await projectLibraryMetrics(project))));
+  const snapshots = new Map();
+  await Promise.all(state.projects.map(async project => snapshots.set(project.projectId, await projectLibrarySnapshot(project))));
+
+  const query = state.libraryQuery.trim().toLowerCase();
+  let projects = state.projects.filter(project => {
+    if (state.libraryView === 'active' && project.archived) return false;
+    if (state.libraryView === 'archived' && !project.archived) return false;
+    if (query && !`${project.title || ''} ${project.activeVersionId || ''}`.toLowerCase().includes(query)) return false;
+    return true;
+  });
+  projects = [...projects].sort((a, b) => {
+    if (state.librarySort === 'title') return String(a.title || '').localeCompare(String(b.title || ''), 'ru');
+    return String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || ''));
+  });
+
   view.className = 'view';
-  view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">HEARTLINE EDITOR 3.1</span><h1>Проекты новелл</h1><p>Текст, изображения, ветвления и мобильная композиция в одном рабочем цикле.</p></div><div class="header-actions"><button id="importNovelButton" class="button secondary">Импорт сценария</button><button id="importProjectButton" class="button primary">Импорт Project ZIP</button></div></header><div class="library-sync-note card pad"><div><span class="status-badge draft">Локальный режим</span><strong>Проекты сохраняются в этом браузере.</strong><p>Для переноса на другое устройство используйте Project ZIP. Сервер cloud sync в статическом GitHub Pages не подключён.</p></div></div><div class="project-list">${state.projects.map(project => { const m = dashboard.get(project.projectId); return `<article class="card project-card"><div><span class="kicker">ПРОЕКТ</span><h2>${Domain.escapeHtml(project.title)}</h2></div><div class="project-card-meta"><span>${Domain.escapeHtml(project.activeVersionId)}</span><span>${Domain.formatDate(project.updatedAt)}</span></div>${m ? `<div class="project-dashboard"><div><span>Кадры</span><b>${m.frames}</b></div><div><span>Визуалы</span><b>${m.assignedPercent}%</b></div><div><span>Замечания</span><b>${m.openReviews}</b></div></div><div class="progress"><span style="width:${m.assignedPercent}%"></span></div><small class="muted">Без изображения: ${m.missing} · требуют проверки: ${m.needsReview}</small>` : ''}<div class="project-card-actions"><button class="button primary" data-open-project="${Domain.escapeHtml(project.projectId)}">Продолжить</button></div></article>`; }).join('')}</div>${state.projects.length ? '' : '<div class="empty-state"><div><h2>Библиотека пуста</h2><p>Импортируйте DOCX, JSON или Project ZIP.</p></div></div>'}</section>`;
+  view.innerHTML = `<section class="page library-page">
+    <header class="page-header"><div><span class="kicker">HEARTLINE EDITOR 3.1</span><h1>Проекты новелл</h1><p>Масштаб истории, интерактивность и состояние производства — до открытия проекта.</p></div><div class="header-actions"><button id="importNovelButton" class="button secondary">Импорт сценария</button><button id="importProjectButton" class="button primary">Импорт Project ZIP</button></div></header>
+    <div class="library-toolbar"><input id="librarySearch" class="input" placeholder="Поиск по названию или версии" value="${Domain.escapeHtml(state.libraryQuery)}"><select id="libraryView" class="select"><option value="active">Активные</option><option value="archived">Архив</option><option value="all">Все</option></select><select id="librarySort" class="select"><option value="updated">Сначала изменённые</option><option value="title">По названию</option></select></div>
+    <div class="library-sync-note card pad"><div><span class="status-badge draft">Локальный режим</span><strong>Проекты сохраняются в этом браузере.</strong><p>Для переноса на другое устройство используйте Project ZIP. Обложки и статистика входят в локальный проект.</p></div></div>
+    <div class="project-list rich-project-list">${projects.map(project => projectCardHtml(project, snapshots.get(project.projectId))).join('')}</div>
+    ${projects.length ? '' : '<div class="empty-state"><div><h2>Проекты не найдены</h2><p>Измените поиск или фильтр библиотеки.</p></div></div>'}
+  </section>`;
+  $('libraryView').value = state.libraryView;
+  $('librarySort').value = state.librarySort;
   $('importNovelButton').onclick = () => { $('novelInput').value = ''; $('novelInput').click(); };
   $('importProjectButton').onclick = () => { $('projectImportInput').value = ''; $('projectImportInput').click(); };
-  view.querySelectorAll('[data-open-project]').forEach(button => button.onclick = () => openProject(button.dataset.openProject));
+  $('librarySearch').oninput = event => {
+    state.libraryQuery = event.target.value;
+    clearTimeout(state.librarySearchTimer);
+    state.librarySearchTimer = setTimeout(async () => {
+      await renderLibrary();
+      const input = $('librarySearch');
+      if (input) { input.focus({ preventScroll: true }); input.setSelectionRange(input.value.length, input.value.length); }
+    }, 180);
+  };
+  $('libraryView').onchange = () => { state.libraryView = $('libraryView').value; renderLibrary(); };
+  $('librarySort').onchange = () => { state.librarySort = $('librarySort').value; renderLibrary(); };
+  view.querySelectorAll('[data-open-project]').forEach(button => button.onclick = event => { event.stopPropagation(); openProject(button.dataset.openProject); });
+  view.querySelectorAll('[data-project-menu]').forEach(button => button.onclick = event => { event.stopPropagation(); openLibraryProjectMenu(button.dataset.projectMenu); });
+  view.querySelectorAll('[data-project-card]').forEach(card => {
+    card.onclick = event => {
+      if (event.target.closest('button,input,select,a')) return;
+      openProject(card.dataset.projectCard);
+    };
+    card.onkeydown = event => {
+      if ((event.key === 'Enter' || event.key === ' ') && event.target === card) { event.preventDefault(); openProject(card.dataset.projectCard); }
+    };
+  });
+  await hydrateLibraryCovers(view);
+}
+function sceneTreeStatus(scene) {
+  const metrics = Domain.sceneFrameMetrics(currentContent(), scene.id, state.assignments, state.reviews);
+  return metrics.missing
+    ? '<i class="status-dot danger" title="Есть кадры без изображения"></i>'
+    : metrics.needsReview
+      ? '<i class="status-dot warn" title="Есть визуалы, требующие проверки"></i>'
+      : '<i class="status-dot good" title="Визуалы сцены в порядке"></i>';
+}
+
+function sceneDisplayLabel(scene, { compact = false } = {}) {
+  const prefix = scene.code || scene.id;
+  return compact ? `${prefix} · ${scene.title}` : `${scene.id} · ${scene.title}`;
+}
+
+function sceneFamilyInfo(scene, chapterScenes) {
+  const code = String(scene.code || '').trim();
+  if (code) {
+    const child = code.match(/^(\d+\.\d+)([A-Za-zА-Яа-я])$/u);
+    if (child) return { key: `code:${child[1]}`, child: true, baseCode: child[1] };
+    const hasChildren = chapterScenes.some(other => String(other.code || '').match(new RegExp(`^${code.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[A-Za-zА-Яа-я]$`, 'u')));
+    if (hasChildren) return { key: `code:${code}`, child: false, baseCode: code };
+    return { key: `solo:${scene.id}`, child: false, solo: true };
+  }
+
+  const id = String(scene.id || '');
+  let numberedRoute = id.match(/^(.*_(?:EQUAL|FIRE|MASK|DIRECT|OATH|NETWORK|BREAK))_(\d+)$/i);
+  if (numberedRoute) return { key: `id:${numberedRoute[1]}`, child: true, baseId: numberedRoute[1], routeGroup: true };
+  const family = id.match(/^((?:CH\d+|OB|CLIM|AM|EP)_SC\d+)(?:_(.+))?$/i);
+  if (family) {
+    const key = family[1];
+    const suffix = family[2] || '';
+    const members = chapterScenes.filter(other => String(other.id || '').startsWith(`${key}_`) || other.id === key);
+    if (members.length > 1) return { key: `id:${key}`, child: !!suffix, baseId: key, routeGroup: members.some(other => /_(?:EQUAL|FIRE|MASK|DIRECT)(?:_|$)/i.test(other.id)) };
+  }
+  return { key: `solo:${scene.id}`, child: false, solo: true };
+}
+
+function sceneButtonHtml(scene, depth = 0) {
+  return `<button class="scene-link scene-link-depth-${depth} ${scene.id === state.selectedSceneId ? 'active' : ''}" data-scene-id="${Domain.escapeHtml(scene.id)}" data-scene-search="${Domain.escapeHtml(`${scene.id} ${scene.code || ''} ${scene.title}`.toLowerCase())}"><span class="scene-link-copy">${Domain.escapeHtml(sceneDisplayLabel(scene, { compact: Boolean(scene.code) }))}</span><span class="scene-status">${sceneTreeStatus(scene)}</span></button>`;
 }
 
 function readerSceneTree() {
   const groups = Domain.chapterGroups(currentContent());
-  return groups.map(group => `<section class="chapter-block"><div class="chapter-title"><span>${Domain.escapeHtml(group.title)}</span><span>${group.scenes.length}</span></div>${group.scenes.map(scene => {
-    const metrics = Domain.sceneFrameMetrics(currentContent(), scene.id, state.assignments, state.reviews);
-    return `<button class="scene-link ${scene.id === state.selectedSceneId ? 'active' : ''}" data-scene-id="${Domain.escapeHtml(scene.id)}"><span>${Domain.escapeHtml(scene.id)} · ${Domain.escapeHtml(scene.title)}</span><span class="scene-status">${metrics.missing ? '<i class="status-dot danger" title="Есть кадры без изображения"></i>' : metrics.needsReview ? '<i class="status-dot warn"></i>' : '<i class="status-dot good"></i>'}</span></button>`;
-  }).join('')}</section>`).join('');
+  return groups.map(group => {
+    const activeChapter = group.scenes.some(scene => scene.id === state.selectedSceneId);
+    const families = new Map();
+    const order = [];
+    for (const scene of group.scenes) {
+      const info = sceneFamilyInfo(scene, group.scenes);
+      if (!families.has(info.key)) { families.set(info.key, { info, scenes: [] }); order.push(info.key); }
+      families.get(info.key).scenes.push(scene);
+    }
+    const body = order.map(key => {
+      const family = families.get(key);
+      if (family.info.solo || family.scenes.length === 1) return sceneButtonHtml(family.scenes[0], 0);
+      const base = family.scenes.find(scene => (!family.info.baseCode || scene.code === family.info.baseCode) && (!family.info.baseId || scene.id === family.info.baseId)) || null;
+      const children = family.scenes.filter(scene => scene !== base);
+      const familyActive = family.scenes.some(scene => scene.id === state.selectedSceneId);
+      let label;
+      if (base) label = sceneDisplayLabel(base, { compact: Boolean(base.code) });
+      else if (family.info.routeGroup) {
+        const sample = family.scenes[0];
+        const sceneNumber = (sample.code || sample.id).match(/(?:SC|\.)(\d+)(?:\D|$)/i)?.[1] || '';
+        label = `Сцена ${sceneNumber || ''} · варианты маршрута`.trim();
+      } else {
+        const sample = family.scenes[0];
+        const baseNumber = String(family.info.baseId || '').match(/SC(\d+)/i)?.[1];
+        label = sample.code ? `Сцена ${family.info.baseCode}` : baseNumber ? `Сцена ${Number(baseNumber)} · связанные эпизоды` : `Связанные сцены`;
+      }
+      return `<details class="scene-family" data-scene-family ${familyActive ? 'open' : ''}><summary><span>${Domain.escapeHtml(label)}</span><b>${family.scenes.length}</b></summary><div class="scene-family-body">${base ? sceneButtonHtml(base, 1) : ''}${children.map(scene => sceneButtonHtml(scene, 1)).join('')}</div></details>`;
+    }).join('');
+    return `<details class="reader-chapter-group" data-reader-chapter ${activeChapter ? 'open' : ''}><summary class="reader-chapter-summary"><span>${Domain.escapeHtml(group.title)}</span><b>${group.scenes.length}</b></summary><div class="reader-chapter-body">${body}</div></details>`;
+  }).join('');
 }
-
 function isMobileReader() {
   return window.matchMedia?.('(max-width: 820px)').matches ?? window.innerWidth <= 820;
 }
@@ -683,8 +1143,21 @@ function wireReader(frame) {
     }
   });
   if ($('sceneSearch')) $('sceneSearch').oninput = event => {
-    const query = event.target.value.toLowerCase();
-    view.querySelectorAll('[data-scene-id]').forEach(button => button.classList.toggle('hidden', !button.textContent.toLowerCase().includes(query)));
+    const query = event.target.value.trim().toLowerCase();
+    view.querySelectorAll('[data-scene-id]').forEach(button => {
+      const matches = !query || (button.dataset.sceneSearch || button.textContent.toLowerCase()).includes(query);
+      button.classList.toggle('hidden', !matches);
+    });
+    view.querySelectorAll('[data-scene-family]').forEach(family => {
+      const visible = [...family.querySelectorAll('[data-scene-id]')].some(button => !button.classList.contains('hidden'));
+      family.classList.toggle('hidden', !visible);
+      if (query && visible) family.open = true;
+    });
+    view.querySelectorAll('[data-reader-chapter]').forEach(chapter => {
+      const visible = [...chapter.querySelectorAll('[data-scene-id]')].some(button => !button.classList.contains('hidden'));
+      chapter.classList.toggle('hidden', !visible);
+      if (query && visible) chapter.open = true;
+    });
   };
   if ($('readerSheetClose')) $('readerSheetClose').onclick = closeReaderSheet;
   if ($('readerDrawerBackdrop')) $('readerDrawerBackdrop').onclick = closeReaderOverlays;
@@ -852,6 +1325,7 @@ async function renderAssets() {
   const assets = allAssets.slice(0, state.assetLimit);
   const usageMap = new Map();
   for (const assignment of state.assignments) if (assignment.assetId) usageMap.set(assignment.assetId, (usageMap.get(assignment.assetId) || 0) + 1);
+  if (state.project?.coverAssetId) usageMap.set(state.project.coverAssetId, (usageMap.get(state.project.coverAssetId) || 0) + 1);
   view.className = 'view';
   view.innerHTML = `<section class="page"><header class="page-header"><div><span class="kicker">ASSET LIBRARY</span><h1>Изображения проекта</h1><p>Оригиналы хранятся как Blob в IndexedDB; кадры используют независимые VisualAssignment.</p></div><div class="header-actions"><button id="uploadAssets" class="button primary">Загрузить изображения</button></div></header><div class="filters"><input id="assetSearch" class="input" style="max-width:420px" placeholder="Название или Asset ID" value="${Domain.escapeHtml(state.assetSearch)}"><span class="status-badge">${allAssets.length} файлов</span></div><div class="asset-grid">${assets.map(asset => `<article class="card asset-card"><div class="asset-thumb"><img data-asset-src="${Domain.escapeHtml(asset.assetId)}" data-thumbnail="true" alt=""></div><div class="asset-copy"><strong title="${Domain.escapeHtml(asset.name)}">${Domain.escapeHtml(asset.name)}</strong><small>${asset.width}×${asset.height} · ${Math.round(asset.fileSize / 1024)} КБ · используется: ${usageMap.get(asset.assetId) || 0}</small></div><div class="asset-actions"><button class="button primary small" data-assign-asset="${asset.assetId}">Назначить кадру</button><button class="button secondary small" data-delete-asset="${asset.assetId}">Удалить</button></div></article>`).join('')}</div>${assets.length ? '' : '<div class="empty-state"><div><h2>Изображений нет</h2><p>Загрузите PNG, JPEG, WebP или AVIF.</p></div></div>'}${allAssets.length > assets.length ? '<div class="load-more-wrap"><button id="assetsLoadMore" class="button secondary">Показать ещё</button></div>' : ''}</section>`;
   $('uploadAssets').onclick = () => { $('assetInput').dataset.mode = 'library'; $('assetInput').value = ''; $('assetInput').click(); };
@@ -1399,6 +1873,10 @@ async function importProjectZip(file) {
       const oldAssetId = entry.name.split('/').pop().replace(/\.[^.]+$/, '');
       importedAssetIds.set(oldAssetId, result.asset.assetId);
     }
+    if (originalProject.coverAssetId) {
+      project.coverAssetId = importedAssetIds.get(originalProject.coverAssetId) || null;
+      await DB.put('projects', project);
+    }
 
     const remapScope = scopeId => {
       if (!scopeId) return DB.workspaceScope(projectId);
@@ -1493,6 +1971,7 @@ function wireGlobal() {
   $('redoButton').onclick = redo;
   $('novelInput').onchange = () => $('novelInput').files.length && handleNovelImport($('novelInput').files);
   $('frameAssetInput').onchange = () => handleFrameAsset($('frameAssetInput').files[0]);
+  $('coverInput').onchange = () => $('coverInput').files[0] && handleProjectCover($('coverInput').files[0]);
   $('assetInput').onchange = () => $('assetInput').files.length && handleAssetInput($('assetInput').files, $('assetInput').dataset.mode || 'library');
   $('gptInput').onchange = () => $('gptInput').files[0] && handleGptImport($('gptInput').files[0]);
   $('projectImportInput').onchange = () => $('projectImportInput').files[0] && importProjectZip($('projectImportInput').files[0]);
