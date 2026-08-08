@@ -11,7 +11,7 @@
   <title>HEARTLINE Novel Editor</title>
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="apple-touch-icon" href="icon-192.png" />
-  <link rel="stylesheet" href="styles.css?v=20260807-270" />
+  <link rel="stylesheet" href="styles.css?v=20260807-280" />
 </head>
 <body>
   <div id="app" class="app-shell">
@@ -126,8 +126,10 @@
       <div class="branch-graph-toolbar">
         <input id="graphSearch" class="search-input" placeholder="Сцена, Choice ID или название" />
         <select id="graphFilter" class="select"><option value="all">Вся новелла</option><option value="current">Текущий маршрут</option><option value="unread">Непройденные</option><option value="reviews">С замечаниями</option><option value="endings">Концовки</option></select>
-        <div class="graph-zoom-controls"><button id="graphZoomOut" class="btn secondary small" type="button">−</button><span id="graphZoomLabel">100%</span><button id="graphZoomIn" class="btn secondary small" type="button">+</button><button id="graphFit" class="btn secondary small" type="button">Вместить</button></div>
+        <div class="graph-view-actions"><button id="graphStart" class="btn secondary small" type="button">Начало</button><button id="graphActivePath" class="btn secondary small" type="button">Мой путь</button><button id="graphClearFocus" class="btn secondary small hidden" type="button">Сбросить пути</button></div>
+        <div class="graph-zoom-controls"><button id="graphZoomOut" class="btn secondary small" type="button">−</button><span id="graphZoomLabel">100%</span><button id="graphZoomIn" class="btn secondary small" type="button">+</button><button id="graphFit" class="btn secondary small" type="button">Вместить</button><button id="graphExportSvg" class="btn secondary small" type="button">SVG</button></div>
       </div>
+      <div id="graphEndingJumps" class="graph-ending-jumps" aria-label="Концовки новеллы"></div>
       <div class="branch-graph-body">
         <div id="graphViewport" class="graph-viewport"><svg id="branchGraphSvg" class="branch-graph-svg" xmlns="http://www.w3.org/2000/svg"></svg></div>
         <aside class="graph-inspector"><div class="graph-inspector-head"><strong>Узел</strong><span>Кликните по сцене или выбору</span></div><div id="graphInspectorBody" class="graph-inspector-body"></div></aside>
@@ -146,10 +148,10 @@
 
   <div id="toast" class="toast hidden" role="status"></div>
 
-  <script src="builtin-novel.js?v=20260807-270"></script>
-  <script src="storage.js?v=20260807-270"></script>
-  <script src="parser.js?v=20260807-270"></script>
-  <script src="exporter.js?v=20260807-270"></script>
-  <script src="app.js?v=20260807-270"></script>
+  <script src="builtin-novel.js?v=20260807-280"></script>
+  <script src="storage.js?v=20260807-280"></script>
+  <script src="parser.js?v=20260807-280"></script>
+  <script src="exporter.js?v=20260807-280"></script>
+  <script src="app.js?v=20260807-280"></script>
 </body>
 </html>
