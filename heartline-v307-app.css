@@ -517,3 +517,107 @@ button:disabled{cursor:not-allowed;opacity:.45}
   body.reader-active .reader-sidebar,body.reader-active .reader-inspector{inset:0 0 64px!important}
   body.reader-active .reader-drawer-backdrop{inset:0 0 64px!important}
 }
+
+/* ======================================================================
+   HEARTLINE v3.0.6 — Bottom Anchored Reader
+   On phones the CURRENT frame is always docked directly above navigation.
+   Short frames sit at the bottom. Long frames grow upward and, only when
+   necessary, scroll inside the frame without moving the Reader shell.
+   ====================================================================== */
+@media(max-width:820px){
+  .reader-scroll{
+    overflow:hidden!important;
+    padding-top:0!important;
+    padding-bottom:8px!important;
+  }
+  .reading-column{
+    height:100%!important;
+    min-height:0!important;
+    display:flex!important;
+    flex-direction:column!important;
+  }
+  .reader-context-zone{
+    flex:0 0 104px!important;
+    height:104px!important;
+    min-height:104px!important;
+    max-height:104px!important;
+  }
+  .reader-current-zone{
+    flex:1 1 auto!important;
+    height:auto!important;
+    min-height:0!important;
+    padding:6px 0 0!important;
+    display:flex!important;
+    flex-direction:column!important;
+    justify-content:flex-end!important;
+    overflow:hidden!important;
+  }
+  .reader-current-zone>.current-frame{
+    flex:0 1 auto!important;
+    width:100%!important;
+    max-height:100%!important;
+    margin-top:auto!important;
+    overflow-y:auto!important;
+    overscroll-behavior:contain!important;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:thin;
+  }
+  .reading-column.reader-no-context .reader-current-zone{
+    flex:1 1 auto!important;
+    height:100%!important;
+    min-height:0!important;
+    padding-top:8px!important;
+  }
+  .reading-column.reader-no-context .reader-context-zone{display:none!important}
+}
+
+@media(max-width:480px){
+  .reader-context-zone{
+    flex-basis:92px!important;
+    height:92px!important;
+    min-height:92px!important;
+    max-height:92px!important;
+  }
+  .reader-current-zone{min-height:0!important}
+}
+
+@media(max-height:650px) and (max-width:820px){
+  .reader-context-zone{
+    flex-basis:72px!important;
+    height:72px!important;
+    min-height:72px!important;
+    max-height:72px!important;
+  }
+  .reader-current-zone{min-height:0!important}
+}
+
+/* ======================================================================
+   HEARTLINE v3.0.7 — Desktop Context Repair
+   Mobile keeps the bottom-anchored current frame. Desktop context returns
+   to a natural readable flow so earlier lines are never clipped by a
+   fixed-height flex container.
+   ====================================================================== */
+@media(min-width:821px){
+  .reader-context-zone{
+    height:auto!important;
+    min-height:0!important;
+    max-height:none!important;
+    overflow:visible!important;
+    display:block!important;
+    padding:2px 2px 12px!important;
+  }
+  .reader-context-zone .context-frame{
+    display:block!important;
+    -webkit-box-orient:initial!important;
+    -webkit-line-clamp:unset!important;
+    line-clamp:unset!important;
+    overflow:visible!important;
+    text-overflow:clip!important;
+    margin:0 8px 11px!important;
+  }
+  .reader-current-zone{
+    min-height:220px!important;
+    height:auto!important;
+    overflow:visible!important;
+  }
+}
