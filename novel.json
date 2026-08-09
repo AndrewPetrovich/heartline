@@ -114,7 +114,1334 @@
       },
       "startSceneExists": true,
       "brokenGotoCount": 0
-    }
+    },
+    "sourceGraph": {
+      "layout": [
+        {
+          "sceneId": "OB_SC01",
+          "x": 0,
+          "y": 0,
+          "group": "OPENING",
+          "routeHint": null
+        },
+        {
+          "sceneId": "OB_SC02_COST",
+          "x": 0,
+          "y": 130,
+          "group": "OPENING",
+          "routeHint": null
+        },
+        {
+          "sceneId": "OB_SC02_MATTEO",
+          "x": 0,
+          "y": 260,
+          "group": "OPENING",
+          "routeHint": null
+        },
+        {
+          "sceneId": "OB_SC02_TEAM",
+          "x": 0,
+          "y": 390,
+          "group": "OPENING",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC01",
+          "x": 380,
+          "y": 0,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC01_NICO",
+          "x": 380,
+          "y": 130,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC01_MATTEO",
+          "x": 380,
+          "y": 260,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC01_OBSERVE",
+          "x": 380,
+          "y": 390,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC02",
+          "x": 380,
+          "y": 520,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC02_PRO",
+          "x": 380,
+          "y": 650,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC02_FLIRT",
+          "x": 380,
+          "y": 780,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC02_VULN",
+          "x": 380,
+          "y": 910,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC03",
+          "x": 380,
+          "y": 1040,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC03_WARN",
+          "x": 380,
+          "y": 1170,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC03_PROBE",
+          "x": 380,
+          "y": 1300,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH01_SC03_HOLD",
+          "x": 380,
+          "y": 1430,
+          "group": "CH01",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH02_SC01_WARN",
+          "x": 760,
+          "y": 0,
+          "group": "CH02",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH02_SC01_PROBE",
+          "x": 760,
+          "y": 130,
+          "group": "CH02",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH02_SC01_HOLD",
+          "x": 760,
+          "y": 260,
+          "group": "CH02",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH02_SC02",
+          "x": 760,
+          "y": 390,
+          "group": "CH02",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH02_SC03_EQUAL",
+          "x": 760,
+          "y": -320,
+          "group": "CH02",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH02_SC03_FIRE",
+          "x": 760,
+          "y": 0,
+          "group": "CH02",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH02_SC03_MASK",
+          "x": 760,
+          "y": 320,
+          "group": "CH02",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH03_SC01",
+          "x": 1140,
+          "y": 0,
+          "group": "CH03",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH03_SC02",
+          "x": 1140,
+          "y": 130,
+          "group": "CH03",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH03_RT01",
+          "x": 1140,
+          "y": 260,
+          "group": "CH03",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH03_SC03_EQUAL",
+          "x": 1140,
+          "y": -320,
+          "group": "CH03",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH03_SC03_FIRE",
+          "x": 1140,
+          "y": 0,
+          "group": "CH03",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH03_SC03_MASK",
+          "x": 1140,
+          "y": 320,
+          "group": "CH03",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH04_SC01",
+          "x": 1520,
+          "y": 0,
+          "group": "CH04",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH04_SC02",
+          "x": 1520,
+          "y": 130,
+          "group": "CH04",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH04_SC02_DIRECT",
+          "x": 1520,
+          "y": 260,
+          "group": "CH04",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH04_SC03_EQUAL",
+          "x": 1520,
+          "y": -320,
+          "group": "CH04",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH04_SC03_FIRE",
+          "x": 1520,
+          "y": 0,
+          "group": "CH04",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH04_SC03_MASK",
+          "x": 1520,
+          "y": 320,
+          "group": "CH04",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH04_SC04_EQUAL",
+          "x": 1520,
+          "y": -190,
+          "group": "CH04",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH04_SC04_FIRE",
+          "x": 1520,
+          "y": 130,
+          "group": "CH04",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH04_SC04_MASK",
+          "x": 1520,
+          "y": 450,
+          "group": "CH04",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH05_SC01",
+          "x": 1900,
+          "y": 0,
+          "group": "CH05",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH05_SC02",
+          "x": 1900,
+          "y": 130,
+          "group": "CH05",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH05_SC03_EQUAL",
+          "x": 1900,
+          "y": -320,
+          "group": "CH05",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH05_SC03_FIRE",
+          "x": 1900,
+          "y": 0,
+          "group": "CH05",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH05_SC03_MASK",
+          "x": 1900,
+          "y": 320,
+          "group": "CH05",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH05_SC04",
+          "x": 1900,
+          "y": 260,
+          "group": "CH05",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH05_SC05_EQUAL",
+          "x": 1900,
+          "y": -190,
+          "group": "CH05",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH05_SC05_FIRE",
+          "x": 1900,
+          "y": 130,
+          "group": "CH05",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH05_SC05_MASK",
+          "x": 1900,
+          "y": 450,
+          "group": "CH05",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH05_SC06_EQUAL",
+          "x": 1900,
+          "y": -60,
+          "group": "CH05",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH05_SC06_FIRE",
+          "x": 1900,
+          "y": 260,
+          "group": "CH05",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH05_SC06_MASK",
+          "x": 1900,
+          "y": 580,
+          "group": "CH05",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH06_RT01",
+          "x": 2280,
+          "y": 0,
+          "group": "CH06",
+          "routeHint": null
+        },
+        {
+          "sceneId": "CH06_SC01_EQUAL",
+          "x": 2280,
+          "y": -320,
+          "group": "CH06",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH06_SC01_FIRE",
+          "x": 2280,
+          "y": 0,
+          "group": "CH06",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH06_SC01_MASK",
+          "x": 2280,
+          "y": 320,
+          "group": "CH06",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CH06_SC02_EQUAL",
+          "x": 2280,
+          "y": -190,
+          "group": "CH06",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CH06_SC02_FIRE",
+          "x": 2280,
+          "y": 130,
+          "group": "CH06",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CH06_SC02_MASK",
+          "x": 2280,
+          "y": 450,
+          "group": "CH06",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CLIM_SC01_EQUAL",
+          "x": 2660,
+          "y": -320,
+          "group": "CLIMAX",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CLIM_SC01_FIRE",
+          "x": 2660,
+          "y": 0,
+          "group": "CLIMAX",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CLIM_SC01_MASK",
+          "x": 2660,
+          "y": 320,
+          "group": "CLIMAX",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "CLIM_SC02_EQUAL",
+          "x": 2660,
+          "y": -190,
+          "group": "CLIMAX",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "CLIM_SC02_FIRE",
+          "x": 2660,
+          "y": 130,
+          "group": "CLIMAX",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "CLIM_SC02_MASK",
+          "x": 2660,
+          "y": 450,
+          "group": "CLIMAX",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "AM_SC01_EQUAL",
+          "x": 3040,
+          "y": -320,
+          "group": "MORNING",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "AM_SC01_FIRE",
+          "x": 3040,
+          "y": 0,
+          "group": "MORNING",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "AM_SC01_MASK",
+          "x": 3040,
+          "y": 320,
+          "group": "MORNING",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "EP_SC01_EQUAL_1",
+          "x": 3420,
+          "y": -320,
+          "group": "EPILOGUE",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "EP_SC01_EQUAL_2",
+          "x": 3420,
+          "y": -190,
+          "group": "EPILOGUE",
+          "routeHint": "EQUAL"
+        },
+        {
+          "sceneId": "EP_SC01_FIRE_1",
+          "x": 3420,
+          "y": 0,
+          "group": "EPILOGUE",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "EP_SC01_FIRE_2",
+          "x": 3420,
+          "y": 130,
+          "group": "EPILOGUE",
+          "routeHint": "FIRE"
+        },
+        {
+          "sceneId": "EP_SC01_MASK_1",
+          "x": 3420,
+          "y": 320,
+          "group": "EPILOGUE",
+          "routeHint": "MASK"
+        },
+        {
+          "sceneId": "EP_SC01_MASK_2",
+          "x": 3420,
+          "y": 450,
+          "group": "EPILOGUE",
+          "routeHint": "MASK"
+        }
+      ],
+      "edges": [
+        {
+          "from": "OB_SC01",
+          "to": "OB_SC02_COST",
+          "choiceId": "OB_C01",
+          "optionId": "OB_C01_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "OB_SC01",
+          "to": "OB_SC02_MATTEO",
+          "choiceId": "OB_C01",
+          "optionId": "OB_C01_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "OB_SC01",
+          "to": "OB_SC02_TEAM",
+          "choiceId": "OB_C01",
+          "optionId": "OB_C01_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "OB_SC02_COST",
+          "to": "CH01_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "OB_SC02_MATTEO",
+          "to": "CH01_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "OB_SC02_TEAM",
+          "to": "CH01_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC01",
+          "to": "CH01_SC01_NICO",
+          "choiceId": "CH01_C00",
+          "optionId": "CH01_C00_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC01",
+          "to": "CH01_SC01_MATTEO",
+          "choiceId": "CH01_C00",
+          "optionId": "CH01_C00_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC01",
+          "to": "CH01_SC01_OBSERVE",
+          "choiceId": "CH01_C00",
+          "optionId": "CH01_C00_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC01_NICO",
+          "to": "CH01_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC01_MATTEO",
+          "to": "CH01_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC01_OBSERVE",
+          "to": "CH01_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC02",
+          "to": "CH01_SC02_PRO",
+          "choiceId": "CH01_C01",
+          "optionId": "CH01_C01_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC02",
+          "to": "CH01_SC02_FLIRT",
+          "choiceId": "CH01_C01",
+          "optionId": "CH01_C01_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC02",
+          "to": "CH01_SC02_VULN",
+          "choiceId": "CH01_C01",
+          "optionId": "CH01_C01_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC02_PRO",
+          "to": "CH01_SC03",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC02_FLIRT",
+          "to": "CH01_SC03",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC02_VULN",
+          "to": "CH01_SC03",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC03",
+          "to": "CH01_SC03_WARN",
+          "choiceId": "CH01_C02",
+          "optionId": "CH01_C02_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC03",
+          "to": "CH01_SC03_PROBE",
+          "choiceId": "CH01_C02",
+          "optionId": "CH01_C02_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC03",
+          "to": "CH01_SC03_HOLD",
+          "choiceId": "CH01_C02",
+          "optionId": "CH01_C02_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC03_WARN",
+          "to": "CH02_SC01_WARN",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC03_PROBE",
+          "to": "CH02_SC01_PROBE",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH01_SC03_HOLD",
+          "to": "CH02_SC01_HOLD",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC01_WARN",
+          "to": "CH02_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC01_PROBE",
+          "to": "CH02_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC01_HOLD",
+          "to": "CH02_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC02",
+          "to": "CH02_SC03_EQUAL",
+          "choiceId": "CH02_C01",
+          "optionId": "CH02_C01_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC02",
+          "to": "CH02_SC03_FIRE",
+          "choiceId": "CH02_C01",
+          "optionId": "CH02_C01_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC02",
+          "to": "CH02_SC03_MASK",
+          "choiceId": "CH02_C01",
+          "optionId": "CH02_C01_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC03_EQUAL",
+          "to": "CH03_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC03_FIRE",
+          "to": "CH03_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH02_SC03_MASK",
+          "to": "CH03_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC01",
+          "to": "CH03_SC02",
+          "choiceId": "CH03_C01",
+          "optionId": "CH03_C01_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC01",
+          "to": "CH03_SC02",
+          "choiceId": "CH03_C01",
+          "optionId": "CH03_C01_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC01",
+          "to": "CH03_SC02",
+          "choiceId": "CH03_C01",
+          "optionId": "CH03_C01_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC02",
+          "to": "CH03_RT01",
+          "choiceId": "CH03_C02",
+          "optionId": "CH03_C02_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC02",
+          "to": "CH03_RT01",
+          "choiceId": "CH03_C02",
+          "optionId": "CH03_C02_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC02",
+          "to": "CH03_RT01",
+          "choiceId": "CH03_C02",
+          "optionId": "CH03_C02_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC02",
+          "to": "CH03_RT01",
+          "choiceId": "CH03_C02",
+          "optionId": "CH03_C02_O4",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_RT01",
+          "to": "CH03_SC03_EQUAL",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "соответствующая маршрутная сцена."
+        },
+        {
+          "from": "CH03_RT01",
+          "to": "CH03_SC03_FIRE",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "соответствующая маршрутная сцена."
+        },
+        {
+          "from": "CH03_RT01",
+          "to": "CH03_SC03_MASK",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "соответствующая маршрутная сцена."
+        },
+        {
+          "from": "CH03_SC03_EQUAL",
+          "to": "CH04_SC01",
+          "choiceId": "CH03_C03_EQUAL",
+          "optionId": "CH03_C03_EQUAL_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC03_EQUAL",
+          "to": "CH04_SC01",
+          "choiceId": "CH03_C03_EQUAL",
+          "optionId": "CH03_C03_EQUAL_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC03_FIRE",
+          "to": "CH04_SC01",
+          "choiceId": "CH03_C03_FIRE",
+          "optionId": "CH03_C03_FIRE_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC03_FIRE",
+          "to": "CH04_SC01",
+          "choiceId": "CH03_C03_FIRE",
+          "optionId": "CH03_C03_FIRE_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC03_MASK",
+          "to": "CH04_SC01",
+          "choiceId": "CH03_C03_MASK",
+          "optionId": "CH03_C03_MASK_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH03_SC03_MASK",
+          "to": "CH04_SC01",
+          "choiceId": "CH03_C03_MASK",
+          "optionId": "CH03_C03_MASK_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC01",
+          "to": "CH04_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC02",
+          "to": "CH04_SC03_EQUAL",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "согласно ROUTE_ID или CH04_SC02_DIRECT."
+        },
+        {
+          "from": "CH04_SC02",
+          "to": "CH04_SC03_FIRE",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "согласно ROUTE_ID или CH04_SC02_DIRECT."
+        },
+        {
+          "from": "CH04_SC02",
+          "to": "CH04_SC03_MASK",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "согласно ROUTE_ID или CH04_SC02_DIRECT."
+        },
+        {
+          "from": "CH04_SC02",
+          "to": "CH04_SC02_DIRECT",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "согласно ROUTE_ID или CH04_SC02_DIRECT."
+        },
+        {
+          "from": "CH04_SC02_DIRECT",
+          "to": "CH04_SC03_EQUAL",
+          "choiceId": "CH04_C01",
+          "optionId": "CH04_C01_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC02_DIRECT",
+          "to": "CH04_SC03_FIRE",
+          "choiceId": "CH04_C01",
+          "optionId": "CH04_C01_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC02_DIRECT",
+          "to": "CH04_SC03_MASK",
+          "choiceId": "CH04_C01",
+          "optionId": "CH04_C01_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC03_EQUAL",
+          "to": "CH04_SC04_EQUAL",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC03_FIRE",
+          "to": "CH04_SC04_FIRE",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC03_MASK",
+          "to": "CH04_SC04_MASK",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC04_EQUAL",
+          "to": "CH05_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC04_FIRE",
+          "to": "CH05_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH04_SC04_MASK",
+          "to": "CH05_SC01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC01",
+          "to": "CH05_SC02",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC02",
+          "to": "CH05_SC03_EQUAL",
+          "choiceId": "CH05_C01",
+          "optionId": "CH05_C01_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC02",
+          "to": "CH05_SC03_FIRE",
+          "choiceId": "CH05_C01",
+          "optionId": "CH05_C01_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC02",
+          "to": "CH05_SC03_MASK",
+          "choiceId": "CH05_C01",
+          "optionId": "CH05_C01_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC03_EQUAL",
+          "to": "CH05_SC04",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC03_FIRE",
+          "to": "CH05_SC04",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC03_MASK",
+          "to": "CH05_SC04",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC04",
+          "to": "CH05_SC05_EQUAL",
+          "choiceId": "CH05_C02",
+          "optionId": "CH05_C02_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC04",
+          "to": "CH05_SC05_FIRE",
+          "choiceId": "CH05_C02",
+          "optionId": "CH05_C02_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC04",
+          "to": "CH05_SC05_MASK",
+          "choiceId": "CH05_C02",
+          "optionId": "CH05_C02_O3",
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC05_EQUAL",
+          "to": "CH05_SC06_EQUAL",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC05_FIRE",
+          "to": "CH05_SC06_FIRE",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC05_MASK",
+          "to": "CH05_SC06_MASK",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC06_EQUAL",
+          "to": "CH06_RT01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC06_FIRE",
+          "to": "CH06_RT01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH05_SC06_MASK",
+          "to": "CH06_RT01",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_RT01",
+          "to": "CH06_SC01_EQUAL",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "согласно ROUTE_ID к CH06_SC01_*"
+        },
+        {
+          "from": "CH06_RT01",
+          "to": "CH06_SC01_FIRE",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "согласно ROUTE_ID к CH06_SC01_*"
+        },
+        {
+          "from": "CH06_RT01",
+          "to": "CH06_SC01_MASK",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "dynamic-route",
+          "rawTarget": "согласно ROUTE_ID к CH06_SC01_*"
+        },
+        {
+          "from": "CH06_SC01_EQUAL",
+          "to": "CH06_SC02_EQUAL",
+          "choiceId": "CH06_C01_EQUAL",
+          "optionId": "CH06_C01_EQUAL_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC01_EQUAL",
+          "to": "CH06_SC02_EQUAL",
+          "choiceId": "CH06_C01_EQUAL",
+          "optionId": "CH06_C01_EQUAL_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC01_FIRE",
+          "to": "CH06_SC02_FIRE",
+          "choiceId": "CH06_C01_FIRE",
+          "optionId": "CH06_C01_FIRE_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC01_FIRE",
+          "to": "CH06_SC02_FIRE",
+          "choiceId": "CH06_C01_FIRE",
+          "optionId": "CH06_C01_FIRE_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC01_MASK",
+          "to": "CH06_SC02_MASK",
+          "choiceId": "CH06_C01_MASK",
+          "optionId": "CH06_C01_MASK_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC01_MASK",
+          "to": "CH06_SC02_MASK",
+          "choiceId": "CH06_C01_MASK",
+          "optionId": "CH06_C01_MASK_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC02_EQUAL",
+          "to": "CLIM_SC01_EQUAL",
+          "choiceId": "CH06_C02_EQUAL",
+          "optionId": "CH06_C02_EQUAL_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC02_EQUAL",
+          "to": "CLIM_SC01_EQUAL",
+          "choiceId": "CH06_C02_EQUAL",
+          "optionId": "CH06_C02_EQUAL_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC02_FIRE",
+          "to": "CLIM_SC01_FIRE",
+          "choiceId": "CH06_C02_FIRE",
+          "optionId": "CH06_C02_FIRE_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC02_FIRE",
+          "to": "CLIM_SC01_FIRE",
+          "choiceId": "CH06_C02_FIRE",
+          "optionId": "CH06_C02_FIRE_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC02_MASK",
+          "to": "CLIM_SC01_MASK",
+          "choiceId": "CH06_C02_MASK",
+          "optionId": "CH06_C02_MASK_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "CH06_SC02_MASK",
+          "to": "CLIM_SC01_MASK",
+          "choiceId": "CH06_C02_MASK",
+          "optionId": "CH06_C02_MASK_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CLIM_SC01_EQUAL",
+          "to": "CLIM_SC02_EQUAL",
+          "choiceId": "CLIM_C01_EQUAL",
+          "optionId": "CLIM_C01_EQUAL_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CLIM_SC01_FIRE",
+          "to": "CLIM_SC02_FIRE",
+          "choiceId": "CLIM_C01_FIRE",
+          "optionId": "CLIM_C01_FIRE_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CLIM_SC01_MASK",
+          "to": "CLIM_SC02_MASK",
+          "choiceId": "CLIM_C01_MASK",
+          "optionId": "CLIM_C01_MASK_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "CLIM_SC02_EQUAL",
+          "to": "AM_SC01_EQUAL",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CLIM_SC02_FIRE",
+          "to": "AM_SC01_FIRE",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "CLIM_SC02_MASK",
+          "to": "AM_SC01_MASK",
+          "choiceId": null,
+          "optionId": null,
+          "kind": "goto"
+        },
+        {
+          "from": "AM_SC01_EQUAL",
+          "to": "EP_SC01_EQUAL_1",
+          "choiceId": "AM_C01_EQUAL",
+          "optionId": "AM_C01_EQUAL_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "AM_SC01_EQUAL",
+          "to": "EP_SC01_EQUAL_2",
+          "choiceId": "AM_C01_EQUAL",
+          "optionId": "AM_C01_EQUAL_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "AM_SC01_FIRE",
+          "to": "EP_SC01_FIRE_1",
+          "choiceId": "AM_C01_FIRE",
+          "optionId": "AM_C01_FIRE_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "AM_SC01_FIRE",
+          "to": "EP_SC01_FIRE_2",
+          "choiceId": "AM_C01_FIRE",
+          "optionId": "AM_C01_FIRE_O2",
+          "kind": "goto"
+        },
+        {
+          "from": "AM_SC01_MASK",
+          "to": "EP_SC01_MASK_1",
+          "choiceId": "AM_C01_MASK",
+          "optionId": "AM_C01_MASK_O1",
+          "kind": "goto"
+        },
+        {
+          "from": "AM_SC01_MASK",
+          "to": "EP_SC01_MASK_2",
+          "choiceId": "AM_C01_MASK",
+          "optionId": "AM_C01_MASK_O2",
+          "kind": "goto"
+        }
+      ]
+    },
+    "graphFixture": {
+      "scenes": 72,
+      "choiceOccurrences": 25,
+      "uniqueChoiceIds": 25,
+      "choiceOptions": 61,
+      "explicitEdges": 106,
+      "branchPoints": 25,
+      "mergePoints": 20,
+      "maxFanIn": 6,
+      "maxFanOut": 4,
+      "brokenTargets": 0
+    },
+    "structuralGroups": [
+      {
+        "id": "OPENING",
+        "title": "Пролог",
+        "order": 0
+      },
+      {
+        "id": "CH01",
+        "title": "Глава 1",
+        "order": 1
+      },
+      {
+        "id": "CH02",
+        "title": "Глава 2",
+        "order": 2
+      },
+      {
+        "id": "CH03",
+        "title": "Глава 3",
+        "order": 3
+      },
+      {
+        "id": "CH04",
+        "title": "Глава 4",
+        "order": 4
+      },
+      {
+        "id": "CH05",
+        "title": "Глава 5",
+        "order": 5
+      },
+      {
+        "id": "CH06",
+        "title": "Глава 6",
+        "order": 6
+      },
+      {
+        "id": "CLIMAX",
+        "title": "Кульминация",
+        "order": 7
+      },
+      {
+        "id": "MORNING",
+        "title": "Утро",
+        "order": 8
+      },
+      {
+        "id": "EPILOGUE",
+        "title": "Эпилог",
+        "order": 9
+      }
+    ],
+    "graphSource": "branching_graph.json"
   },
   "characters": [
     {

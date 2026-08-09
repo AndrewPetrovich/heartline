@@ -143,7 +143,24 @@
       "imagePolicy": "unique_slot_per_text_unit",
       "missingImageFallback": "neutral_background"
     },
-    "sourceFormatVersion": "1.2"
+    "sourceFormatVersion": "1.2",
+    "graphFixture": {
+      "chapters": 12,
+      "scenes": 100,
+      "blocks": 2991,
+      "choiceOccurrences": 31,
+      "uniqueChoiceIds": 27,
+      "choiceOptions": 96,
+      "mainDecisionIds": 22,
+      "c15Occurrences": 3,
+      "c18Occurrences": 3,
+      "branchMarkers": 180,
+      "variables": 74,
+      "reviewRoutes": 12,
+      "endings": 3
+    },
+    "mainDecisionPattern": "C01–C22",
+    "graphSource": "source-driven branchContext/editorialTrace/reviewRoutes"
   },
   "characters": [
     {

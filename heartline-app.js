@@ -4,7 +4,7 @@ import * as Domain from './heartline-domain.js';
 import { StoryEngine, createSession } from './heartline-engine.js';
 import * as Assets from './heartline-assets.js';
 import { DEVICE_PRESETS, renderPlayerFrame, renderDeviceComparison, orientedDevice } from './heartline-player-renderer.js';
-import { buildGraph, layoutGraph, renderGraph, renderGraphOutline, renderGraphMinimap, enableGraphNavigation } from './heartline-graph.js';
+import { buildGraph, layoutGraph, renderGraph, renderGraphOutline, renderGraphMinimap, enableGraphNavigation, consequenceSet, graphFixtureSummary, presentationStats, clearGraphLayoutCache } from './heartline-graph.js';
 import * as ProjectStats from './heartline-project-stats.js';
 
 const $ = id => document.getElementById(id);
@@ -70,9 +70,18 @@ const state = {
   previewPanelStyle: 'glass',
   previewDraftAssignment: null,
   previewMobileSheet: 'none',
-  graphView: 'chapter',
+  graphView: 'story',
   graphWeightMode: 'scenes',
+  graphDecisionScope: 'main',
+  graphRouteMode: 'structural',
+  graphReviewRouteId: 'all',
+  graphHideSmall: false,
+  graphMinShare: .02,
+  graphDensityMetric: 'events',
+  graphGroupMode: 'auto',
+  graphTechnicalMode: false,
   graphFocusPath: false,
+  graphConsequence: null,
   graphInspectorTab: 'node',
   graphFilter: 'all',
   graphSearch: '',
@@ -1545,162 +1554,301 @@ async function showCandidate(candidateId) {
   $('candidateChanges').querySelectorAll('[data-accept-change]').forEach(button=>button.onclick=()=>acceptOne(Number(button.dataset.acceptChange))); $('candidateChanges').querySelectorAll('[data-reject-change]').forEach(button=>button.onclick=async()=>{const index=Number(button.dataset.rejectChange);candidate.changes[index].decision='rejected';await DB.put('gptCandidates',{...candidate,updatedAt:Domain.now()});button.closest('article').classList.add('decision-done');}); $('candidateChanges').querySelectorAll('[data-open-conflict]').forEach(button=>button.onclick=()=>{closeModal();selectFragment(button.dataset.openConflict,{route:'reader',direct:true});}); $('acceptAllSafe').onclick=async()=>{for(let i=0;i<(candidate.changes||[]).length;i++)if(!candidate.changes[i].decision)await acceptOne(i);toast('Все изменения без конфликтов обработаны');};
 }
 
+function graphNodeSceneId(node, model) {
+  if (!node) return null;
+  if (node.sceneId) return node.sceneId;
+  if (node.firstSceneId) return node.firstSceneId;
+  if (node.sourceSceneIds?.length) return node.sourceSceneIds[0];
+  if (node.occurrences?.length) return node.occurrences[0].sceneId;
+  if (node.choiceId) return model.decisions.find(item => item.choiceId === node.choiceId)?.occurrences?.[0]?.sceneId || null;
+  return null;
+}
+
+function graphSelectionDescriptor(node, model) {
+  if (!node) return null;
+  return {
+    id: node.id,
+    kind: node.kind,
+    sceneId: graphNodeSceneId(node, model),
+    decisionId: node.choiceId || node.decisionId || null,
+    endingId: node.endingId || null,
+    groupId: node.structuralGroupId || (node.kind === 'structuralBlock' ? node.id : null),
+    title: node.title || ''
+  };
+}
+
+function resolveGraphSelection(model, presentation) {
+  const selected = state.graphSelected;
+  if (!selected) return null;
+  let node = presentation.nodes.find(item => item.id === selected.id);
+  if (!node && selected.decisionId) node = presentation.nodes.find(item => item.choiceId === selected.decisionId || item.decisionId === selected.decisionId);
+  if (!node && selected.sceneId) node = presentation.nodes.find(item => item.sceneId === selected.sceneId || item.firstSceneId === selected.sceneId || item.sourceSceneIds?.includes(selected.sceneId) || item.occurrences?.some(occurrence => occurrence.sceneId === selected.sceneId));
+  if (!node && selected.endingId) node = presentation.nodes.find(item => item.endingId === selected.endingId);
+  if (!node && selected.groupId) node = presentation.nodes.find(item => item.id === selected.groupId || item.structuralGroupId === selected.groupId);
+  return node || null;
+}
+
+function graphPhysicalPathSet(model, sceneId) {
+  if (!sceneId) return null;
+  const startIds = model.nodes.filter(node => node.sceneId === sceneId || node.sourceSceneIds?.includes(sceneId)).map(node => node.id);
+  if (!startIds.length) startIds.push(`scene:${sceneId}`);
+  const incoming = new Map(model.nodes.map(node => [node.id, []]));
+  const outgoing = new Map(model.nodes.map(node => [node.id, []]));
+  model.edges.forEach(edge => { incoming.get(edge.to)?.push(edge); outgoing.get(edge.from)?.push(edge); });
+  const keep = new Set(startIds);
+  const walk = (map, forward) => {
+    const stack = [...startIds];
+    while (stack.length) {
+      const id = stack.pop();
+      for (const edge of map.get(id) || []) {
+        const next = forward ? edge.to : edge.from;
+        if (keep.has(next)) continue;
+        keep.add(next); stack.push(next);
+      }
+    }
+  };
+  walk(incoming, false); walk(outgoing, true);
+  return keep;
+}
+
+function graphFilterNode(node, model, visited) {
+  if (state.graphFilter === 'decisions') return ['logicalDecision','decisionOccurrence'].includes(node.kind);
+  if (state.graphFilter === 'unread') {
+    const sceneIds = node.sourceSceneIds || (node.sceneId ? [node.sceneId] : node.occurrences?.map(item => item.sceneId) || []);
+    return !sceneIds.length || sceneIds.some(sceneId => !visited.has(sceneId));
+  }
+  if (state.graphFilter === 'missing') return Number(node.metrics?.missing || 0) > 0;
+  if (state.graphFilter === 'reviews') return Number(node.metrics?.reviews || 0) > 0;
+  if (state.graphFilter === 'endings') return node.kind === 'ending' || node.kind === 'routeFinal' || node.end;
+  return true;
+}
+
+function graphModeControls(model) {
+  if (state.graphView === 'decisions') {
+    const hasMain = model.decisions.some(decision => decision.mainLattice);
+    return `<select id="graphDecisionScope" class="select"><option value="${hasMain ? 'main' : 'all'}">${hasMain ? 'Основная lattice C01–C22' : 'Все решения'}</option><option value="all">Все решения</option><option value="ending">Влияющие на финал</option><option value="repeated">Повторяющиеся</option><option value="local">Локальные</option></select>`;
+  }
+  if (state.graphView === 'routes') {
+    const routeOptions = model.reviewRoutes.map(route => `<option value="${Domain.escapeHtml(route.id)}">${Domain.escapeHtml(`${route.id} · ${route.name || route.id}`)}</option>`).join('');
+    return `<select id="graphRouteMode" class="select"><option value="structural">Структурные семейства</option>${model.reviewRoutes.length ? '<option value="review">Проверочные маршруты</option>' : ''}</select>${state.graphRouteMode === 'review' && model.reviewRoutes.length ? `<select id="graphReviewRoute" class="select"><option value="all">Все проверочные маршруты</option>${routeOptions}</select>` : ''}<select id="graphWeight" class="select"><option value="scenes">Толщина: сцены</option><option value="frames">Толщина: кадры</option><option value="words">Толщина: слова</option></select><label class="graph-toolbar-check"><input id="graphHideSmall" type="checkbox" ${state.graphHideSmall ? 'checked' : ''}> Скрыть малые</label><select id="graphMinShare" class="select" ${state.graphHideSmall ? '' : 'disabled'}><option value="0.02">Порог 2%</option><option value="0.05">Порог 5%</option><option value="0.1">Порог 10%</option></select>`;
+  }
+  if (state.graphView === 'novel') {
+    return `<select id="graphGroupMode" class="select"><option value="auto">Структура источника</option><option value="chapters">Главы</option></select><select id="graphDensity" class="select"><option value="events">Плотность: события</option><option value="choices">Плотность: Choice</option><option value="words">Плотность: слова</option><option value="reviews">Плотность: замечания</option></select>`;
+  }
+  return `<label class="graph-toolbar-check"><input id="graphTechnicalMode" type="checkbox" ${state.graphTechnicalMode ? 'checked' : ''}> Технический режим</label>`;
+}
+
+function graphIntegrityHtml(model) {
+  const fixture = graphFixtureSummary(model);
+  if (!model.integrity.valid) {
+    return `<div class="graph21-integrity error"><strong>Структура содержит ${model.integrity.errors.length} ошибок</strong><span>${Domain.escapeHtml(model.integrity.errors[0]?.message || '')}</span><button id="graphShowIntegrity" class="button secondary small">Показать</button></div>`;
+  }
+  const fixtureText = fixture.ok ? 'эталонные метрики совпадают' : `${Object.keys(fixture.diff).length} расхождений с fixture`;
+  const warning = model.integrity.warnings.length ? ` · ${model.integrity.warnings.length} предупреждений` : '';
+  return `<div class="graph21-integrity good"><span>✓ Топология валидна · ${fixtureText}${warning}</span><span>Scene ${fixture.summary.scenes} · Choice ${fixture.summary.choiceOccurrences} · связей ${model.edges.length}</span></div>`;
+}
+
 async function renderGraphRoute() {
   if (!state.project) return renderNoProject('Граф');
-  const model = buildGraph(currentContent(), state.assignments, state.reviews);
-  const layout = layoutGraph(model);
+  const model = buildGraph(currentContent(), state.assignments, state.reviews, { graphOverrides: state.workspace?.graphOverrides || {} });
+  const baseLayout = layoutGraph(model);
   const visited = new Set((state.session?.timeline || []).map(entry => entry.sceneId));
-  const modeMeta = {
-    chapter: { title: 'Карта главы', help: 'Текущая глава и ближайшие решения без визуального шума.' },
-    decisions: { title: 'Карта решений', help: 'Только ключевые решения, точки схождения и финалы всей новеллы.' },
-    routes: { title: 'Анализ путей', help: 'Sankey-представление: толщина потока показывает объём контента.' },
-    novel: { title: 'Карта романа', help: 'Радиальный обзор глав, крупных переходов и финалов.' }
-  };
-  const meta = modeMeta[state.graphView] || modeMeta.chapter;
   const current = effectiveFrame();
-  const selected = state.graphSelected && model.nodes.find(node => node.id === state.graphSelected.id) || null;
-  if (state.graphSelected && !selected && state.graphSelected.kind !== 'chapter') state.graphSelected = null;
-  const breadcrumb = [state.project.title, selected?.chapterTitle || current?.chapterTitle, selected?.kind === 'choice' ? selected.choiceId : selected?.sceneId || current?.sceneId].filter(Boolean);
-  const showOutline = state.graphView === 'chapter';
-  const showMinimap = state.graphView === 'chapter' || state.graphView === 'decisions';
+  const modeMeta = {
+    story: { title: 'Карта сюжета', help: 'Сюжетные линии, StoryBeat, решения и точки схождения.' },
+    decisions: { title: 'Карта решений', help: 'Логические Choice, варианты и отложенные последствия.' },
+    routes: { title: 'Анализ путей', help: 'Corridor families и проверочные маршруты без перебора всех комбинаций.' },
+    novel: { title: 'Карта романа', help: 'Макроструктура глав и актов, плотность и ключевые точки.' }
+  };
+  const meta = modeMeta[state.graphView] || modeMeta.story;
+  const showOutline = state.graphView === 'story';
+  const showMinimap = state.graphView === 'story' || state.graphView === 'decisions';
+  const selectedTitle = state.graphSelected?.title || current?.sceneTitle || current?.sceneId;
+  const breadcrumb = [state.project.title, current?.chapterTitle, selectedTitle].filter(Boolean);
+
   view.className = 'view';
-  view.innerHTML = `<section class="page full"><div class="graph2-page graph2-view-${state.graphView}">
-    <div class="graph2-modebar">
-      <div class="graph2-tabs" role="tablist" aria-label="Режим карты">
-        <button class="graph2-tab ${state.graphView === 'chapter' ? 'active' : ''}" data-graph-view="chapter" type="button"><strong>Карта главы</strong><span>локальная структура</span></button>
-        <button class="graph2-tab ${state.graphView === 'decisions' ? 'active' : ''}" data-graph-view="decisions" type="button"><strong>Карта решений</strong><span>ключевые выборы</span></button>
-        <button class="graph2-tab ${state.graphView === 'routes' ? 'active' : ''}" data-graph-view="routes" type="button"><strong>Анализ путей</strong><span>потоки контента</span></button>
-        <button class="graph2-tab ${state.graphView === 'novel' ? 'active' : ''}" data-graph-view="novel" type="button"><strong>Карта романа</strong><span>обзор целиком</span></button>
-      </div>
-      <div class="graph2-mode-copy"><strong>${meta.title}</strong><span>${meta.help}</span></div>
-    </div>
-    <div class="graph2-breadcrumb">${breadcrumb.map((item, index) => `<span>${index ? '› ' : ''}${Domain.escapeHtml(item)}</span>`).join('')}</div>
-    <div class="graph2-toolbar">
-      <input id="graphSearch" class="input" placeholder="Сцена, Choice ID, Fragment ID или название" value="${Domain.escapeHtml(state.graphSearch)}">
-      <select id="graphFilter" class="select">
-        <option value="all">Вся история</option>
-        <option value="decisions">Только решения</option>
-        <option value="unread">Непройденные</option>
-        <option value="missing">Без изображений</option>
-        <option value="reviews">С замечаниями</option>
-        <option value="endings">Концовки</option>
-      </select>
-      ${state.graphView === 'routes' ? `<select id="graphWeight" class="select"><option value="scenes">Толщина: сцены</option><option value="frames">Толщина: кадры</option><option value="words">Толщина: слова</option></select>` : ''}
-      <button id="graphFocusPath" class="button ${state.graphFocusPath ? 'primary' : 'secondary'} small">${state.graphFocusPath ? 'Показан путь' : 'Показать путь'}</button>
-      <div class="inline-actions graph2-zoom"><button id="graphZoomOut" class="button secondary small">−</button><span id="graphZoomLabel" class="status-badge">100%</span><button id="graphZoomIn" class="button secondary small">+</button><button id="graphFit" class="button secondary small">Вместить</button></div>
-    </div>
-    <div class="graph2-body ${showOutline ? 'has-outline' : ''}">
-      <aside id="graphOutline" class="graph2-outline ${showOutline ? '' : 'hidden'}"><div class="graph-side-head"><span class="kicker">OUTLINE</span><strong>Глава и решения</strong><small>Клик — выбрать · двойной клик — открыть</small></div><div id="graphOutlineBody" class="graph-outline-body"></div></aside>
-      <div id="graphViewport" class="graph2-viewport" tabindex="0"><div id="graphCanvas" class="graph-canvas"></div>${showMinimap ? '<div id="graphMinimap" class="graph2-minimap" aria-label="Миникарта"></div>' : ''}<div class="graph2-nav-tip">Колесо — zoom · средняя кнопка / Space+drag — pan · F — вместить · 0 — 100%</div></div>
-      <aside id="graphInspector" class="graph2-inspector"><button id="graphInspectorClose" class="graph2-inspector-close" type="button" aria-label="Закрыть">×</button><div id="graphInspectorBody">${graphModeInspectorHtml(meta.title, model)}</div></aside>
-    </div>
+  view.innerHTML = `<section class="page full"><div class="graph21-page graph21-view-${state.graphView}">
+    <div class="graph21-modebar"><div class="graph21-tabs" role="tablist" aria-label="Режим графа">
+      <button class="graph21-tab ${state.graphView === 'story' ? 'active' : ''}" data-graph-view="story"><strong>Карта сюжета</strong><span>линии и переплетения</span></button>
+      <button class="graph21-tab ${state.graphView === 'decisions' ? 'active' : ''}" data-graph-view="decisions"><strong>Карта решений</strong><span>Choice и последствия</span></button>
+      <button class="graph21-tab ${state.graphView === 'routes' ? 'active' : ''}" data-graph-view="routes"><strong>Анализ путей</strong><span>семейства маршрутов</span></button>
+      <button class="graph21-tab ${state.graphView === 'novel' ? 'active' : ''}" data-graph-view="novel"><strong>Карта романа</strong><span>макроструктура</span></button>
+    </div><div class="graph21-mode-copy"><strong>${meta.title}</strong><span>${meta.help}</span></div></div>
+    ${graphIntegrityHtml(model)}
+    <div class="graph21-breadcrumb">${breadcrumb.map((item, index) => `<span>${index ? '› ' : ''}${Domain.escapeHtml(item)}</span>`).join('')}</div>
+    <div class="graph21-toolbar"><input id="graphSearch" class="input graph-search" placeholder="Сцена, Fragment ID, Choice ID, финал или название" value="${Domain.escapeHtml(state.graphSearch)}"><select id="graphFilter" class="select"><option value="all">Вся история</option><option value="decisions">Только решения</option><option value="unread">Непройденные</option><option value="missing">Без изображений</option><option value="reviews">С замечаниями</option><option value="endings">Концовки</option></select>${graphModeControls(model)}<button id="graphFocusPath" class="button ${state.graphFocusPath ? 'primary' : 'secondary'} small">${state.graphFocusPath ? 'Путь показан' : 'Показать путь'}</button>${state.graphConsequence ? '<button id="graphClearConsequence" class="button secondary small">Снять последствия</button>' : ''}<div class="graph21-zoom"><button id="graphZoomOut" class="button secondary small">−</button><span id="graphZoomLabel" class="status-badge">100%</span><button id="graphZoomIn" class="button secondary small">+</button><button id="graphFit" class="button secondary small">Вместить</button></div></div>
+    <div class="graph21-body ${showOutline ? 'has-outline' : ''}"><aside id="graphOutline" class="graph21-outline ${showOutline ? '' : 'hidden'}"><div class="graph-side-head"><span class="kicker">СТРУКТУРА</span><strong>Главы, сцены и решения</strong><small>Клик — выбрать · двойной клик — открыть</small></div><div id="graphOutlineBody" class="graph-outline-body"></div></aside><div id="graphViewport" class="graph21-viewport" tabindex="0"><div id="graphCanvas" class="graph21-canvas"></div>${showMinimap ? '<div id="graphMinimap" class="graph21-minimap"></div>' : ''}<div id="graphLayoutBadge" class="graph21-layout-badge">Детерминированный layout</div><div class="graph21-nav-tip">Колесо — zoom · средняя кнопка / Space+drag — pan · F — вместить · 0 — 100%</div></div><aside id="graphInspector" class="graph21-inspector"><button id="graphInspectorClose" class="graph21-inspector-close" aria-label="Закрыть">×</button><div id="graphInspectorBody"></div></aside></div>
   </div></section>`;
   $('graphFilter').value = state.graphFilter;
+  if ($('graphDecisionScope')) $('graphDecisionScope').value = state.graphDecisionScope;
+  if ($('graphRouteMode')) $('graphRouteMode').value = state.graphRouteMode;
+  if ($('graphReviewRoute')) $('graphReviewRoute').value = state.graphReviewRouteId;
   if ($('graphWeight')) $('graphWeight').value = state.graphWeightMode;
-  const openNode = node => { const first = node?.sceneId ? sceneFrames(sceneById(node.sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); };
+  if ($('graphMinShare')) $('graphMinShare').value = String(state.graphMinShare);
+  if ($('graphGroupMode')) $('graphGroupMode').value = state.graphGroupMode;
+  if ($('graphDensity')) $('graphDensity').value = state.graphDensityMetric;
+
+  let currentPresentation = null;
+  const openNode = node => {
+    const sceneId = graphNodeSceneId(node, model);
+    const first = sceneId ? sceneFrames(sceneById(sceneId))[0] : null;
+    if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true });
+  };
   const selectNode = node => {
-    state.graphSelected = node;
-    if (node?.sceneId) state.selectedSceneId = node.sceneId;
-    showGraphInspector(node, model);
+    state.graphSelected = graphSelectionDescriptor(node, model);
+    const sceneId = graphNodeSceneId(node, model);
+    if (sceneId) state.selectedSceneId = sceneId;
+    showGraphInspector(node, model, currentPresentation);
     state.graphNavigation?.focusNode?.(node.id);
     $('graphInspector')?.classList.add('mobile-open');
   };
-  const draw = () => {
-    const selectedId = state.graphSelected?.id || null;
-    const focusSceneId = state.graphFocusPath ? (state.graphSelected?.sceneId || current?.sceneId) : null;
-    const svg = renderGraph($('graphCanvas'), model, layout, {
-      viewMode: state.graphView,
-      currentSceneId: current?.sceneId,
-      selectedNodeId: selectedId,
-      visitedSceneIds: visited,
-      filter: state.graphFilter,
-      search: state.graphSearch,
-      weightMode: state.graphWeightMode,
-      focusSceneId,
-      onSelect: selectNode,
-      onOpen: openNode
-    });
-    state.graphNavigation?.destroy?.();
-    const initial = state.graphView === 'novel' ? .82 : state.graphView === 'routes' ? .72 : .84;
-    state.graphNavigation = enableGraphNavigation($('graphViewport'), svg, {
-      initial,
-      onZoom: zoom => {
-        if ($('graphZoomLabel')) $('graphZoomLabel').textContent = `${Math.round(zoom * 100)}%`;
-        const vp = $('graphViewport');
-        vp?.classList.toggle('semantic-low', zoom < .42);
-        vp?.classList.toggle('semantic-mid', zoom >= .42 && zoom < .75);
-        vp?.classList.toggle('semantic-high', zoom >= .75);
-      },
-      onClear: () => { state.graphSelected = null; state.graphFocusPath = false; renderGraphRoute(); }
-    });
-    if (showOutline) {
-      renderGraphOutline($('graphOutlineBody'), model, { currentSceneId: current?.sceneId, selectedChapter: state.graphSelected?.chapterTitle || current?.chapterTitle, onSelect: selectNode, onOpen: openNode });
-    }
-    if (showMinimap && $('graphMinimap')) {
-      renderGraphMinimap($('graphMinimap'), svg);
-      $('graphMinimap').onclick = () => state.graphNavigation?.fit();
-    }
-    if (state.graphSelected?.id) requestAnimationFrame(() => state.graphNavigation?.focusNode?.(state.graphSelected.id));
-    else if (state.graphSearch.trim()) {
-      const q = state.graphSearch.trim().toLowerCase();
-      const found = model.nodes.find(node => `${node.sceneId || ''} ${node.choiceId || ''} ${node.title || ''}`.toLowerCase().includes(q));
-      if (found) requestAnimationFrame(() => state.graphNavigation?.focusNode?.(found.id));
-    }
-  };
-  draw();
-  view.querySelectorAll('[data-graph-view]').forEach(button => button.onclick = () => { state.graphView = button.dataset.graphView; renderGraphRoute(); });
-  $('graphSearch').oninput = () => { state.graphSearch = $('graphSearch').value; renderGraphRoute(); };
+
+  const focusSet = state.graphConsequence
+    ? consequenceSet(model, state.graphConsequence.decisionId, state.graphConsequence.optionId)
+    : state.graphFocusPath
+      ? graphPhysicalPathSet(model, state.graphSelected?.sceneId || current?.sceneId)
+      : null;
+
+  const svg = renderGraph($('graphCanvas'), model, baseLayout, {
+    viewMode: state.graphView,
+    currentSceneId: current?.sceneId,
+    selectedNodeId: state.graphSelected?.id,
+    visitedSceneIds: visited,
+    filter: state.graphFilter,
+    search: state.graphSearch,
+    decisionScope: state.graphDecisionScope,
+    routeMode: state.graphRouteMode,
+    reviewRouteId: state.graphReviewRouteId,
+    weightMode: state.graphWeightMode,
+    hideSmall: state.graphHideSmall,
+    minShare: state.graphMinShare,
+    densityMetric: state.graphDensityMetric,
+    groupMode: state.graphGroupMode,
+    consequenceNodeIds: focusSet,
+    filterNode: node => graphFilterNode(node, model, visited),
+    onSelect: selectNode,
+    onOpen: openNode
+  });
+  currentPresentation = svg.__heartlineBundle?.presentation || null;
+  const layout = svg.__heartlineBundle?.layout;
+  const resolved = resolveGraphSelection(model, currentPresentation || { nodes: [] });
+  if (resolved) {
+    state.graphSelected = graphSelectionDescriptor(resolved, model);
+    requestAnimationFrame(() => state.graphNavigation?.focusNode?.(resolved.id));
+    showGraphInspector(resolved, model, currentPresentation);
+  } else showGraphInspector(null, model, currentPresentation);
+
+  state.graphNavigation?.destroy?.();
+  state.graphNavigation = enableGraphNavigation($('graphViewport'), svg, {
+    initial: state.graphView === 'novel' ? .86 : state.graphView === 'routes' ? .78 : .84,
+    onZoom: zoom => {
+      $('graphZoomLabel').textContent = `${Math.round(zoom * 100)}%`;
+      const viewport = $('graphViewport'); viewport.classList.toggle('semantic-low', zoom < .42); viewport.classList.toggle('semantic-mid', zoom >= .42 && zoom < .75); viewport.classList.toggle('semantic-high', zoom >= .75);
+    },
+    onClear: () => { state.graphSelected = null; state.graphFocusPath = false; state.graphConsequence = null; renderGraphRoute(); }
+  });
+  const currentContextNode = currentPresentation?.nodes.find(node =>
+    node.sceneId === current?.sceneId ||
+    node.firstSceneId === current?.sceneId ||
+    node.sourceSceneIds?.includes(current?.sceneId) ||
+    node.occurrences?.some(occurrence => occurrence.sceneId === current?.sceneId)
+  );
+  const defaultFocusNode = resolved || ((state.graphView === 'story' || state.graphView === 'decisions')
+    ? currentContextNode || (state.graphView === 'decisions' ? currentPresentation?.nodes.find(node => node.kind === 'logicalDecision') : null)
+    : null);
+  if (defaultFocusNode && (state.graphView === 'story' || state.graphView === 'decisions')) setTimeout(() => state.graphNavigation?.focusNode?.(defaultFocusNode.id), 60);
+  else if (resolved) setTimeout(() => state.graphNavigation?.focusNode?.(resolved.id), 60);
+  if (layout?.safeFallback) { $('graphLayoutBadge').textContent = 'Safe Layered Layout'; $('graphLayoutBadge').classList.add('safe'); }
+  else $('graphLayoutBadge').textContent = `Layout: 0 overlap${layout?.quality?.edgeThroughNode ? ` · ${layout.quality.edgeThroughNode} обходов` : ''}`;
+
+  if (showOutline) renderGraphOutline($('graphOutlineBody'), model, { currentSceneId: current?.sceneId, selectedChapter: state.graphSelected?.sceneId ? sceneById(state.graphSelected.sceneId)?.chapterTitle : current?.chapterTitle, onSelect: selectNode, onOpen: openNode });
+  if (showMinimap && $('graphMinimap')) { renderGraphMinimap($('graphMinimap'), svg); $('graphMinimap').onclick = () => state.graphNavigation?.fit(); }
+  if (!resolved && state.graphSearch.trim()) {
+    const query = state.graphSearch.trim().toLowerCase();
+    const found = currentPresentation?.nodes.find(node => `${node.id} ${node.sceneId || ''} ${node.choiceId || ''} ${node.endingId || ''} ${node.title || ''} ${node.sourceSceneIds?.join(' ') || ''} ${node.fragmentIds?.join(' ') || ''}`.toLowerCase().includes(query));
+    if (found) requestAnimationFrame(() => state.graphNavigation?.focusNode?.(found.id));
+  }
+
+  view.querySelectorAll('[data-graph-view]').forEach(button => button.onclick = () => { state.graphView = button.dataset.graphView; state.graphConsequence = null; renderGraphRoute(); });
+  $('graphSearch').onchange = () => { state.graphSearch = $('graphSearch').value; renderGraphRoute(); };
+  $('graphSearch').onkeydown = event => { if (event.key === 'Enter') { state.graphSearch = event.currentTarget.value; renderGraphRoute(); } };
   $('graphFilter').onchange = () => { state.graphFilter = $('graphFilter').value; renderGraphRoute(); };
+  $('graphDecisionScope')?.addEventListener('change', () => { state.graphDecisionScope = $('graphDecisionScope').value; renderGraphRoute(); });
+  $('graphRouteMode')?.addEventListener('change', () => { state.graphRouteMode = $('graphRouteMode').value; renderGraphRoute(); });
+  $('graphReviewRoute')?.addEventListener('change', () => { state.graphReviewRouteId = $('graphReviewRoute').value; renderGraphRoute(); });
   $('graphWeight')?.addEventListener('change', () => { state.graphWeightMode = $('graphWeight').value; renderGraphRoute(); });
-  $('graphFocusPath').onclick = () => { state.graphFocusPath = !state.graphFocusPath; renderGraphRoute(); };
-  $('graphZoomOut').onclick = () => state.graphNavigation?.zoomOut();
-  $('graphZoomIn').onclick = () => state.graphNavigation?.zoomIn();
-  $('graphFit').onclick = () => state.graphNavigation?.fit();
+  $('graphHideSmall')?.addEventListener('change', () => { state.graphHideSmall = $('graphHideSmall').checked; renderGraphRoute(); });
+  $('graphMinShare')?.addEventListener('change', () => { state.graphMinShare = Number($('graphMinShare').value) || .02; renderGraphRoute(); });
+  $('graphGroupMode')?.addEventListener('change', () => { state.graphGroupMode = $('graphGroupMode').value; renderGraphRoute(); });
+  $('graphDensity')?.addEventListener('change', () => { state.graphDensityMetric = $('graphDensity').value; renderGraphRoute(); });
+  $('graphTechnicalMode')?.addEventListener('change', () => { state.graphTechnicalMode = $('graphTechnicalMode').checked; showGraphInspector(resolved, model, currentPresentation); });
+  $('graphFocusPath').onclick = () => { state.graphFocusPath = !state.graphFocusPath; state.graphConsequence = null; renderGraphRoute(); };
+  $('graphClearConsequence')?.addEventListener('click', () => { state.graphConsequence = null; renderGraphRoute(); });
+  $('graphZoomOut').onclick = () => state.graphNavigation?.zoomOut(); $('graphZoomIn').onclick = () => state.graphNavigation?.zoomIn(); $('graphFit').onclick = () => state.graphNavigation?.fit();
   $('graphInspectorClose').onclick = () => $('graphInspector')?.classList.remove('mobile-open');
+  $('graphShowIntegrity')?.addEventListener('click', () => showGraphIntegrity(model));
 }
 
-function graphModeInspectorHtml(title, model) {
-  const scenes = model.nodes.filter(n => n.kind === 'scene');
-  const choices = model.nodes.filter(n => n.kind === 'choice');
-  const endings = model.nodes.filter(n => n.kind === 'ending' || (n.kind === 'scene' && n.end));
-  const words = scenes.reduce((sum, n) => sum + (n.metrics?.words || 0), 0);
-  return `<span class="kicker">STORY GRAPH 2.0</span><h2>${Domain.escapeHtml(title)}</h2><p class="muted">Выберите узел на карте.</p><div class="metric-grid graph2-inspector-metrics"><div class="metric"><strong>${scenes.length}</strong><span>сцен</span></div><div class="metric"><strong>${choices.length}</strong><span>решений</span></div><div class="metric"><strong>${endings.length}</strong><span>финалов</span></div><div class="metric"><strong>${words.toLocaleString('ru-RU')}</strong><span>слов</span></div></div>`;
+function showGraphIntegrity(model) {
+  const fixture = graphFixtureSummary(model);
+  const items = [...model.integrity.errors, ...model.integrity.warnings];
+  openModal({ kicker: 'GRAPH INTEGRITY', title: model.integrity.valid ? 'Структура валидна' : 'Ошибки структуры', body: `<div class="metric-grid graph21-inspector-metrics"><div class="metric"><strong>${model.fixture.summary.scenes}</strong><span>сцен</span></div><div class="metric"><strong>${model.fixture.summary.choiceOccurrences}</strong><span>Choice</span></div><div class="metric"><strong>${model.edges.length}</strong><span>связей модели</span></div><div class="metric"><strong>${Object.keys(fixture.diff).length}</strong><span>расхождений fixture</span></div></div><div class="graph-integrity-list">${items.length ? items.map(item => `<div><strong>${Domain.escapeHtml(item.code)}</strong><br>${Domain.escapeHtml(item.message)}</div>`).join('') : '<p>Ошибок и предупреждений нет.</p>'}</div>`, footer: '<button id="graphIntegrityClose" class="button primary">Готово</button>' });
+  $('graphIntegrityClose').onclick = closeModal;
 }
 
-function showGraphInspector(node, model = null) {
-  state.graphSelected = node;
-  const host = $('graphInspectorBody') || $('graphInspector');
-  if (!host || !node) return;
-  const outgoing = node.kind === 'chapter' ? [] : (model?.edges || []).filter(edge => edge.from === node.id);
-  const incoming = node.kind === 'chapter' ? [] : (model?.edges || []).filter(edge => edge.to === node.id);
-  const scene = node.sceneId ? sceneById(node.sceneId) : null;
+function graphSummaryInspector(model, presentation) {
+  const stats = presentation ? presentationStats(presentation) : { nodes: 0, edges: 0, scenes: 0, words: 0 };
+  return `<span class="kicker">STORY GRAPH 2.1</span><h2>${Domain.escapeHtml(presentation?.title || 'Граф')}</h2><p class="muted">Выберите узел на карте. Технические SET/IF скрыты до открытия Inspector.</p><div class="metric-grid graph21-inspector-metrics"><div class="metric"><strong>${stats.nodes}</strong><span>узлов вида</span></div><div class="metric"><strong>${stats.edges}</strong><span>связей вида</span></div><div class="metric"><strong>${model.decisions.length}</strong><span>логич. решений</span></div><div class="metric"><strong>${model.endings.length}</strong><span>финалов</span></div></div><section class="graph-inspector-section"><h3>Эталон проекта</h3><p class="muted">Fixture: ${model.fixture.ok ? 'совпадает' : 'есть расхождения'}<br>Scene: ${model.fixture.summary.scenes}<br>Choice occurrences: ${model.fixture.summary.choiceOccurrences}<br>Unique Choice: ${model.fixture.summary.uniqueChoiceIds}</p></section>`;
+}
+
+function showGraphInspector(node, model, presentation) {
+  const host = $('graphInspectorBody'); if (!host) return;
+  if (!node) { host.innerHTML = graphSummaryInspector(model, presentation); return; }
   const tab = state.graphInspectorTab || 'node';
-  const tabs = `<div class="graph2-inspector-tabs"><button class="${tab === 'node' ? 'active' : ''}" data-graph-inspector-tab="node">Узел</button><button class="${tab === 'links' ? 'active' : ''}" data-graph-inspector-tab="links">Связи</button><button class="${tab === 'metrics' ? 'active' : ''}" data-graph-inspector-tab="metrics">Метрики</button></div>`;
+  const outgoing = (presentation?.edges || []).filter(edge => edge.from === node.id);
+  const incoming = (presentation?.edges || []).filter(edge => edge.to === node.id);
+  const tabs = `<div class="graph21-inspector-tabs"><button class="${tab === 'node' ? 'active' : ''}" data-graph-inspector-tab="node">Узел</button><button class="${tab === 'links' ? 'active' : ''}" data-graph-inspector-tab="links">Связи</button><button class="${tab === 'metrics' ? 'active' : ''}" data-graph-inspector-tab="metrics">Метрики</button></div>`;
   let body = '';
   if (tab === 'links') {
-    const renderLink = (edge, direction) => { const id = direction === 'in' ? edge.from : edge.to; const target = model?.nodes?.find(item => item.id === id); return `<button class="graph-inspector-link" data-inspector-node="${Domain.escapeHtml(id)}"><span>${Domain.escapeHtml(edge.label || target?.title || 'Переход')}</span><small>${direction === 'in' ? '←' : '→'} ${Domain.escapeHtml(target?.title || target?.sceneId || id)}</small></button>`; };
-    body = `<section class="graph-inspector-section"><h3>Входящие</h3>${incoming.length ? incoming.map(edge => renderLink(edge, 'in')).join('') : '<p class="muted">Нет входящих связей.</p>'}</section><section class="graph-inspector-section"><h3>Исходящие</h3>${outgoing.length ? outgoing.map(edge => renderLink(edge, 'out')).join('') : '<p class="muted">Нет исходящих связей.</p>'}</section>`;
+    const link = (edge, direction) => { const id = direction === 'in' ? edge.from : edge.to; const target = presentation?.nodes.find(item => item.id === id); return `<button class="graph-inspector-link" data-inspector-node="${Domain.escapeHtml(id)}"><span>${Domain.escapeHtml(edge.label || target?.title || 'Переход')}</span><small>${direction === 'in' ? '←' : '→'} ${Domain.escapeHtml(target?.title || id)}</small></button>`; };
+    body = `<section class="graph-inspector-section"><h3>Входящие</h3>${incoming.length ? incoming.map(edge => link(edge, 'in')).join('') : '<p class="muted">Нет входящих связей.</p>'}</section><section class="graph-inspector-section"><h3>Исходящие</h3>${outgoing.length ? outgoing.map(edge => link(edge, 'out')).join('') : '<p class="muted">Нет исходящих связей.</p>'}</section>`;
   } else if (tab === 'metrics') {
     const metrics = node.metrics || {};
-    body = `<div class="metric-grid graph2-inspector-metrics"><div class="metric"><strong>${metrics.scenes ?? (node.kind === 'scene' ? 1 : '—')}</strong><span>сцен</span></div><div class="metric"><strong>${metrics.frames ?? '—'}</strong><span>кадров</span></div><div class="metric"><strong>${metrics.words?.toLocaleString?.('ru-RU') ?? '—'}</strong><span>слов</span></div><div class="metric"><strong>${metrics.reviews ?? 0}</strong><span>замечаний</span></div><div class="metric"><strong>${metrics.missing ?? 0}</strong><span>без визуала</span></div><div class="metric"><strong>${node.optionCount ?? metrics.choices ?? '—'}</strong><span>вариантов/решений</span></div></div>`;
-  } else if (node.kind === 'choice') {
-    const options = outgoing.filter(edge => edge.kind === 'option');
-    body = `<span class="kicker">РЕШЕНИЕ</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.choiceId)} · ${Domain.escapeHtml(node.chapterTitle)}</p><span class="status-badge ${node.significant ? 'needs-review' : 'draft'}">${node.significant ? 'Значимое решение' : 'Локальный выбор'}</span><section class="graph-inspector-section"><h3>Варианты</h3>${options.length ? options.map(edge => { const target = model?.nodes?.find(item => item.id === edge.to); return `<button class="graph-inspector-link" data-inspector-node="${Domain.escapeHtml(edge.to)}"><span>${Domain.escapeHtml(edge.label || 'Вариант')}</span><small>→ ${Domain.escapeHtml(target?.title || target?.sceneId || '')}</small></button>`; }).join('') : '<p class="muted">Переходы не определены.</p>'}</section>`;
-  } else if (node.kind === 'chapter') {
-    body = `<span class="kicker">ГЛАВА</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">Крупный блок всей новеллы.</p>`;
-  } else if (node.kind === 'ending') {
-    body = `<span class="kicker">ФИНАЛ</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.endingId || '')} · концовка новеллы</p><span class="graph-route-badge route-${node.routeKey || 'common'}">Финальный маршрут</span>`;
+    body = `<div class="metric-grid graph21-inspector-metrics"><div class="metric"><strong>${metrics.scenes ?? (node.kind === 'scene' ? 1 : '—')}</strong><span>сцен</span></div><div class="metric"><strong>${metrics.frames ?? '—'}</strong><span>кадров</span></div><div class="metric"><strong>${Number(metrics.words || 0).toLocaleString('ru-RU')}</strong><span>слов</span></div><div class="metric"><strong>${metrics.reviews ?? 0}</strong><span>замечаний</span></div><div class="metric"><strong>${metrics.missing ?? 0}</strong><span>без визуала</span></div><div class="metric"><strong>${node.optionCount ?? metrics.choices ?? '—'}</strong><span>решений</span></div></div>`;
+  } else if (node.kind === 'logicalDecision') {
+    body = `<span class="kicker">ЛОГИЧЕСКОЕ РЕШЕНИЕ</span><h2>${Domain.escapeHtml(node.choiceId)} · ${Domain.escapeHtml(node.title)}</h2><p class="muted">${node.occurrenceCount || 1} ${Domain.plural(node.occurrenceCount || 1, 'появление', 'появления', 'появлений')} · ${Domain.escapeHtml((node.chapterTitles || [node.chapterTitle]).join(' · '))}</p>${node.repeated ? '<span class="status-badge needs-review">Occurrence объединены</span>' : ''}<section class="graph-inspector-section"><h3>Варианты</h3>${(node.options || []).map(option => `<article class="graph-option-card"><header><strong>${Domain.escapeHtml(option.id || '')}</strong><button class="button secondary small" data-graph-consequence="${Domain.escapeHtml(option.id || '')}">Последствия</button></header><p>${Domain.escapeHtml(option.label || '')}</p><div class="graph-option-effects">${(option.effects || []).map(effect => `<span>${Domain.escapeHtml(effect.raw || `${effect.variable} ${effect.operator || ''} ${effect.value || ''}`)}</span>`).join('') || '<span>Без SET-эффектов</span>'}</div>${state.graphTechnicalMode ? `<small class="graph-choice-effect">GOTO: ${Domain.escapeHtml((option.gotos || []).join(', ') || 'нет')}<br>Условия: ${Domain.escapeHtml((option.conditions || []).map(String).join('; ') || 'нет')}</small>` : ''}</article>`).join('')}</section>`;
+  } else if (node.kind === 'storyBeat') {
+    const currentLane = node.laneId || 'common';
+    body = `<span class="kicker">STORYBEAT</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${node.metrics?.scenes || 0} сцен · ${Number(node.metrics?.words || 0).toLocaleString('ru-RU')} слов</p><section class="graph-inspector-section"><h3>Сюжетная линия</h3><select id="graphStorylineOverride" class="select">${model.storylines.map(line => `<option value="${Domain.escapeHtml(line.id)}" ${line.id === currentLane ? 'selected' : ''}>${Domain.escapeHtml(line.title)}</option>`).join('')}</select><p class="muted">Источник: ${Domain.escapeHtml((node.storylineSources || ['common']).join(', '))} · уверенность ${Math.round(Number(node.storylineConfidence ?? 1) * 100)}%. Ручной override имеет приоритет над routeHint и branchContext.</p></section><section class="graph-inspector-section"><h3>Сцены блока</h3>${(node.sourceSceneIds || []).map(sceneId => `<button class="graph-inspector-link" data-open-scene="${Domain.escapeHtml(sceneId)}"><span>${Domain.escapeHtml(sceneById(sceneId)?.title || sceneId)}</span><small>${Domain.escapeHtml(sceneId)}</small></button>`).join('')}</section>`;
+  } else if (node.kind === 'structuralBlock') {
+    body = `<span class="kicker">СТРУКТУРНЫЙ БЛОК</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${node.metrics?.scenes || 0} сцен · ${node.metrics?.choices || 0} решений · ${node.metrics?.branches || 0} ветвлений</p><section class="graph-inspector-section"><h3>Ключевые точки</h3><p>${Domain.escapeHtml((node.keyPoints || []).join(' · ') || 'Не определены')}</p></section>`;
+  } else if (node.kind === 'ending' || node.kind === 'routeFinal') {
+    body = `<span class="kicker">ФИНАЛ</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.endingId || '')}</p>`;
+  } else if (node.kind === 'merge') {
+    body = `<span class="kicker">СЛИЯНИЕ</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${node.fanIn || incoming.length} входящих путей сходятся в одной точке.</p>`;
   } else {
-    body = `<span class="kicker">СЦЕНА</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(node.sceneId || '')} · ${Domain.escapeHtml(node.chapterTitle || '')}</p><section class="graph-inspector-section"><h3>Маршрут</h3><span class="graph-route-badge route-${node.routeKey || 'common'}">${node.routeKey === 'equal' ? 'На равных' : node.routeKey === 'fire' ? 'Игра с огнём' : node.routeKey === 'mask' ? 'Без масок' : node.routeKey === 'direct' ? 'Прямой маршрут' : node.routeKey === 'oath' ? 'Старая Клятва' : node.routeKey === 'network' ? 'Новая сеть' : node.routeKey === 'break' ? 'Разрыв' : 'Общая линия'}</span></section>`;
+    const sceneId = graphNodeSceneId(node, model);
+    const scene = sceneId ? sceneById(sceneId) : null;
+    body = `<span class="kicker">СЦЕНА</span><h2>${Domain.escapeHtml(node.title)}</h2><p class="muted">${Domain.escapeHtml(sceneId || '')} · ${Domain.escapeHtml(node.chapterTitle || scene?.chapterTitle || '')}</p>${state.graphTechnicalMode && scene ? `<section class="graph-inspector-section"><h3>Технические зависимости</h3><p class="muted">Branch markers: ${scene.steps?.filter(step => step.branchContext).length || 0}<br>Group: ${Domain.escapeHtml(scene.editor?.group || scene.chapterId || '—')}</p></section>` : ''}`;
   }
-  host.innerHTML = `${tabs}${body}<div class="graph2-inspector-actions">${node.sceneId ? '<button id="graphReader" class="button primary">Открыть в Читать</button><button id="graphStoryboard" class="button secondary">Сториборд</button><button id="graphPreview" class="button secondary">Превью</button>' : ''}<button id="graphInspectorFocus" class="button secondary">${state.graphFocusPath ? 'Снять фокус пути' : 'Показать путь'}</button></div>`;
-  host.querySelectorAll('[data-graph-inspector-tab]').forEach(button => button.onclick = () => { state.graphInspectorTab = button.dataset.graphInspectorTab; showGraphInspector(node, model); });
-  host.querySelectorAll('[data-inspector-node]').forEach(button => button.onclick = () => { const target = model?.nodes?.find(item => item.id === button.dataset.inspectorNode); if (target) { showGraphInspector(target, model); state.graphNavigation?.focusNode?.(target.id); } });
-  $('graphReader')?.addEventListener('click', () => { const first = node.sceneId ? sceneFrames(sceneById(node.sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); });
-  $('graphStoryboard')?.addEventListener('click', () => { if (node.sceneId) { state.selectedSceneId = node.sceneId; setRoute('storyboard'); } });
-  $('graphPreview')?.addEventListener('click', () => { const first = node.sceneId ? sceneFrames(sceneById(node.sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'preview', direct: true }); });
-  $('graphInspectorFocus')?.addEventListener('click', () => { state.graphFocusPath = !state.graphFocusPath; renderGraphRoute(); });
+  host.innerHTML = `${tabs}${body}<div class="graph21-inspector-actions">${graphNodeSceneId(node, model) ? '<button id="graphReader" class="button primary">Открыть в Читать</button><button id="graphStoryboard" class="button secondary">Сториборд</button><button id="graphPreview" class="button secondary">Превью</button>' : ''}<button id="graphInspectorFocus" class="button secondary">${state.graphFocusPath ? 'Снять фокус пути' : 'Показать путь'}</button></div>`;
+  host.querySelectorAll('[data-graph-inspector-tab]').forEach(button => button.onclick = () => { state.graphInspectorTab = button.dataset.graphInspectorTab; showGraphInspector(node, model, presentation); });
+  host.querySelectorAll('[data-inspector-node]').forEach(button => button.onclick = () => { const target = presentation?.nodes.find(item => item.id === button.dataset.inspectorNode); if (target) { state.graphSelected = graphSelectionDescriptor(target, model); showGraphInspector(target, model, presentation); state.graphNavigation?.focusNode?.(target.id); } });
+  host.querySelectorAll('[data-open-scene]').forEach(button => button.onclick = () => { const first = sceneFrames(sceneById(button.dataset.openScene))[0]; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); });
+  host.querySelectorAll('[data-graph-consequence]').forEach(button => button.onclick = () => { state.graphConsequence = { decisionId: node.id, optionId: button.dataset.graphConsequence }; state.graphSelected = graphSelectionDescriptor(node, model); renderGraphRoute(); });
+  $('graphStorylineOverride')?.addEventListener('change', async () => {
+    state.workspace.graphOverrides ||= { sceneStorylines: {} };
+    state.workspace.graphOverrides.sceneStorylines ||= {};
+    (node.sourceSceneIds || []).forEach(sceneId => { state.workspace.graphOverrides.sceneStorylines[sceneId] = [$('graphStorylineOverride').value]; });
+    state.workspace.updatedAt = Domain.now(); await DB.put('workspaceDrafts', state.workspace); clearGraphLayoutCache(); toast('Сюжетная линия обновлена'); renderGraphRoute();
+  });
+  const sceneId = graphNodeSceneId(node, model);
+  $('graphReader')?.addEventListener('click', () => { const first = sceneId ? sceneFrames(sceneById(sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'reader', direct: true }); });
+  $('graphStoryboard')?.addEventListener('click', () => { if (sceneId) { state.selectedSceneId = sceneId; setRoute('storyboard'); } });
+  $('graphPreview')?.addEventListener('click', () => { const first = sceneId ? sceneFrames(sceneById(sceneId))[0] : null; if (first) selectFragment(first.fragmentId, { route: 'preview', direct: true }); });
+  $('graphInspectorFocus')?.addEventListener('click', () => { state.graphFocusPath = !state.graphFocusPath; state.graphConsequence = null; state.graphSelected = graphSelectionDescriptor(node, model); renderGraphRoute(); });
 }
+
 
 function productionPreflight() { const validation=parser.validateNovel(Domain.applyTextEditsToContent(currentContent(),state.workspace.textEdits||{}));const metrics=Domain.projectMetrics(currentContent(),state.workspace,state.assignments,state.reviews);const criticalReviews=state.reviews.filter(review=>review.severity==='critical'&&!Domain.CLOSED_REVIEW_STATUSES.has(review.status)).length;const blockers=[];if(!validation.ok)blockers.push(`${validation.errors?.length||1} ошибок структуры`);if(metrics.missing)blockers.push(`${metrics.missing} кадров без изображения`);if(metrics.needsReview)blockers.push(`${metrics.needsReview} визуалов требуют проверки`);if(criticalReviews)blockers.push(`${criticalReviews} критичных замечаний`);return{validation,metrics,criticalReviews,blockers,ready:blockers.length===0};}
 
