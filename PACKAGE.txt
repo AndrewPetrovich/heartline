@@ -1,2 +1,3 @@
-HEARTLINE Editor 3.3 — Story Graph 2.1 FULL
+HEARTLINE Editor 3.4 — Project Core + Story Graph 2.1
 Files are stored at ZIP root. Upload them to the repository root.
+Run: npm test && npm run check

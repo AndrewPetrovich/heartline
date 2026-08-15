@@ -1,7 +1,7 @@
 {
   "name": "HEARTLINE Frame & Visual Editor",
   "short_name": "HEARTLINE",
-  "description": "Редактор интерактивных новелл: текст, изображения, мобильное превью, версии и GPT.",
+  "description": "Локальный source-backed редактор интерактивных новелл: вычитка, изображения, граф, версии, recovery и export.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

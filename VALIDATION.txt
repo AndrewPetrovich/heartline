@@ -1,0 +1,105 @@
+Validation generated: 2026-08-15
+
+
+> heartline-editor@3.4.0 test
+> node --test tests/*.test.js
+
+TAP version 13
+# Subtest: archive policy rejects traversal and absolute paths
+ok 1 - archive policy rejects traversal and absolute paths
+  ---
+  duration_ms: 2.101956
+  type: 'test'
+  ...
+# Subtest: archive policy rejects zip-bomb ratios and size limits
+ok 2 - archive policy rejects zip-bomb ratios and size limits
+  ---
+  duration_ms: 0.608012
+  type: 'test'
+  ...
+# Subtest: project context requires stable UUID identity
+ok 3 - project context requires stable UUID identity
+  ---
+  duration_ms: 1.591572
+  type: 'test'
+  ...
+# Subtest: missing fragment identities become UUID-backed and survive reorder
+ok 4 - missing fragment identities become UUID-backed and survive reorder
+  ---
+  duration_ms: 2.510439
+  type: 'test'
+  ...
+# Subtest: review is invalidated when source hash changes
+ok 5 - review is invalidated when source hash changes
+  ---
+  duration_ms: 0.285345
+  type: 'test'
+  ...
+# Subtest: source scan distinguishes unchanged moved modified deleted
+ok 6 - source scan distinguishes unchanged moved modified deleted
+  ---
+  duration_ms: 0.308636
+  type: 'test'
+  ...
+# Subtest: transport import explicitly creates a UUID project
+ok 7 - transport import explicitly creates a UUID project
+  ---
+  duration_ms: 1.527908
+  type: 'test'
+  ...
+# Subtest: Project ZIP restore preserves existing projectId instead of creating a copy
+ok 8 - Project ZIP restore preserves existing projectId instead of creating a copy
+  ---
+  duration_ms: 2.483752
+  type: 'test'
+  ...
+# Subtest: reconnecting the same source keeps projectId
+ok 9 - reconnecting the same source keeps projectId
+  ---
+  duration_ms: 3.049489
+  type: 'test'
+  ...
+# Subtest: save creates revision and recovery then commits source
+ok 10 - save creates revision and recovery then commits source
+  ---
+  duration_ms: 1.969042
+  type: 'test'
+  ...
+# Subtest: external modification becomes conflict and is never overwritten
+ok 11 - external modification becomes conflict and is never overwritten
+  ---
+  duration_ms: 2.781681
+  type: 'test'
+  ...
+# Subtest: failed source write leaves recovery and dirty/error state
+ok 12 - failed source write leaves recovery and dirty/error state
+  ---
+  duration_ms: 0.680607
+  type: 'test'
+  ...
+# Subtest: autosave revision policy does not create a revision on every pause
+ok 13 - autosave revision policy does not create a revision on every pause
+  ---
+  duration_ms: 0.801985
+  type: 'test'
+  ...
+# Subtest: project context checkpoint can rehydrate the same project after local context loss
+ok 14 - project context checkpoint can rehydrate the same project after local context loss
+  ---
+  duration_ms: 0.599833
+  type: 'test'
+  ...
+1..14
+# tests 14
+# suites 0
+# pass 14
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 288.286552
+
+
+> heartline-editor@3.4.0 check
+> node --check heartline-db.js && node --check heartline-assets.js && node --check sw.js && find hl-editor -name '*.js' -print0 | xargs -0 -n1 node --check
+
