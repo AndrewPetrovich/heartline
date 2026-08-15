@@ -1,0 +1,43 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.5.0",
+  "baseCommit": "fa289737b47f12bab5190229f789413d53055d70",
+  "mode": "non-destructive-update",
+  "replace": [
+    "PACKAGE.txt",
+    "hl-editor/index.js",
+    "index.html",
+    "manifest.webmanifest",
+    "package.json",
+    "sw.js"
+  ],
+  "add": [
+    "APPLY_3_5.md",
+    "DELETE_THESE_FILES_3_5.txt",
+    "HL_EDITOR_PROOFREADING.md",
+    "QA_PROOFREADING_3_5.md",
+    "README_v350.txt",
+    "VALIDATION_3_5.txt",
+    "apply-heartline-3.5.ps1",
+    "apply-heartline-3.5.sh",
+    "hl-editor/proofreading/domain/proofreading.js",
+    "hl-editor/proofreading/application/proofreading-service.js",
+    "hl-editor/proofreading/ports/proofreading-repository.js",
+    "hl-editor/proofreading/infrastructure/browser-proofreading-repository.js",
+    "hl-editor/proofreading/presentation/proofreading-workspace.js",
+    "hl-editor/proofreading/presentation/proofreading.css",
+    "tests/proofreading-domain.test.js",
+    "tests/proofreading-service.test.js",
+    "tools/verify-repository.mjs"
+  ],
+  "delete": [
+    "repair-heartline-3.4.ps1",
+    "repair-heartline-3.4.sh",
+    "REPAIR_INSTRUCTIONS.txt"
+  ],
+  "requiredPostApplyCheck": "npm run verify-repository",
+  "validation": [
+    "npm test",
+    "npm run check"
+  ]
+}

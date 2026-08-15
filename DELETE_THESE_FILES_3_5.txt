@@ -1,0 +1,5 @@
+Temporary 3.4 repair files that should be removed from the repository after applying 3.5:
+
+repair-heartline-3.4.ps1
+repair-heartline-3.4.sh
+REPAIR_INSTRUCTIONS.txt

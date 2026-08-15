@@ -1,0 +1,214 @@
+HEARTLINE Editor 3.5 validation
+Base: fa289737b47f12bab5190229f789413d53055d70
+
+
+> heartline-editor@3.5.0 test
+> node --test tests/*.test.js
+
+TAP version 13
+# Subtest: archive policy rejects traversal and absolute paths
+ok 1 - archive policy rejects traversal and absolute paths
+  ---
+  duration_ms: 1.5497
+  type: 'test'
+  ...
+# Subtest: archive policy rejects zip-bomb ratios and size limits
+ok 2 - archive policy rejects zip-bomb ratios and size limits
+  ---
+  duration_ms: 0.398601
+  type: 'test'
+  ...
+# Subtest: project context requires stable UUID identity
+ok 3 - project context requires stable UUID identity
+  ---
+  duration_ms: 2.151867
+  type: 'test'
+  ...
+# Subtest: missing fragment identities become UUID-backed and survive reorder
+ok 4 - missing fragment identities become UUID-backed and survive reorder
+  ---
+  duration_ms: 4.272943
+  type: 'test'
+  ...
+# Subtest: review is invalidated when source hash changes
+ok 5 - review is invalidated when source hash changes
+  ---
+  duration_ms: 5.321757
+  type: 'test'
+  ...
+# Subtest: source scan distinguishes unchanged moved modified deleted
+ok 6 - source scan distinguishes unchanged moved modified deleted
+  ---
+  duration_ms: 0.630059
+  type: 'test'
+  ...
+# Subtest: transport import explicitly creates a UUID project
+ok 7 - transport import explicitly creates a UUID project
+  ---
+  duration_ms: 2.663818
+  type: 'test'
+  ...
+# Subtest: Project ZIP restore preserves existing projectId instead of creating a copy
+ok 8 - Project ZIP restore preserves existing projectId instead of creating a copy
+  ---
+  duration_ms: 3.844612
+  type: 'test'
+  ...
+# Subtest: reconnecting the same source keeps projectId
+ok 9 - reconnecting the same source keeps projectId
+  ---
+  duration_ms: 3.562411
+  type: 'test'
+  ...
+# Subtest: save creates revision and recovery then commits source
+ok 10 - save creates revision and recovery then commits source
+  ---
+  duration_ms: 2.009715
+  type: 'test'
+  ...
+# Subtest: external modification becomes conflict and is never overwritten
+ok 11 - external modification becomes conflict and is never overwritten
+  ---
+  duration_ms: 3.555893
+  type: 'test'
+  ...
+# Subtest: failed source write leaves recovery and dirty/error state
+ok 12 - failed source write leaves recovery and dirty/error state
+  ---
+  duration_ms: 0.879981
+  type: 'test'
+  ...
+# Subtest: autosave revision policy does not create a revision on every pause
+ok 13 - autosave revision policy does not create a revision on every pause
+  ---
+  duration_ms: 0.861334
+  type: 'test'
+  ...
+# Subtest: project context checkpoint can rehydrate the same project after local context loss
+ok 14 - project context checkpoint can rehydrate the same project after local context loss
+  ---
+  duration_ms: 0.652842
+  type: 'test'
+  ...
+# Subtest: proofreading has five review passes by default
+ok 15 - proofreading has five review passes by default
+  ---
+  duration_ms: 7.232274
+  type: 'test'
+  ...
+# Subtest: granular review hash invalidates only the changed fragment
+ok 16 - granular review hash invalidates only the changed fragment
+  ---
+  duration_ms: 2.270412
+  type: 'test'
+  ...
+# Subtest: open text review takes precedence over reviewed status
+ok 17 - open text review takes precedence over reviewed status
+  ---
+  duration_ms: 0.396455
+  type: 'test'
+  ...
+# Subtest: durable anchor relocates after text is inserted before it
+ok 18 - durable anchor relocates after text is inserted before it
+  ---
+  duration_ms: 0.498329
+  type: 'test'
+  ...
+# Subtest: deterministic checks find spacing, repeat, mixed scripts and dash
+ok 19 - deterministic checks find spacing, repeat, mixed scripts and dash
+  ---
+  duration_ms: 17.067385
+  type: 'test'
+  ...
+# Subtest: project terminology proposes canonical spelling
+ok 20 - project terminology proposes canonical spelling
+  ---
+  duration_ms: 3.693333
+  type: 'test'
+  ...
+# Subtest: unsafe nested-quantifier regex is rejected
+ok 21 - unsafe nested-quantifier regex is rejected
+  ---
+  duration_ms: 1.180045
+  type: 'test'
+  ...
+# Subtest: search and replace supports safe regex preview
+ok 22 - search and replace supports safe regex preview
+  ---
+  duration_ms: 3.272242
+  type: 'test'
+  ...
+# Subtest: aggregate status exposes changed and attention before completion
+ok 23 - aggregate status exposes changed and attention before completion
+  ---
+  duration_ms: 0.858615
+  type: 'test'
+  ...
+# Subtest: review fingerprint changes with text
+ok 24 - review fingerprint changes with text
+  ---
+  duration_ms: 0.693307
+  type: 'test'
+  ...
+# Subtest: workspace model reports progress per chapter and shared review route
+ok 25 - workspace model reports progress per chapter and shared review route
+  ---
+  duration_ms: 7.770278
+  type: 'test'
+  ...
+# Subtest: open review blocks marking a fragment reviewed
+ok 26 - open review blocks marking a fragment reviewed
+  ---
+  duration_ms: 3.67538
+  type: 'test'
+  ...
+# Subtest: new review stores durable offsets and simplified workflow status
+ok 27 - new review stores durable offsets and simplified workflow status
+  ---
+  duration_ms: 1.532234
+  type: 'test'
+  ...
+# Subtest: proofreading edit does not invalidate approved visual assignment
+ok 28 - proofreading edit does not invalidate approved visual assignment
+  ---
+  duration_ms: 1.075167
+  type: 'test'
+  ...
+# Subtest: bulk search replace creates safety revision and leaves reviewed unit changed
+ok 29 - bulk search replace creates safety revision and leaves reviewed unit changed
+  ---
+  duration_ms: 2.647477
+  type: 'test'
+  ...
+# Subtest: scene completion skips fragments with unresolved reviews
+ok 30 - scene completion skips fragments with unresolved reviews
+  ---
+  duration_ms: 4.11734
+  type: 'test'
+  ...
+# Subtest: final book approval calls hash-bound project review after granular completion
+ok 31 - final book approval calls hash-bound project review after granular completion
+  ---
+  duration_ms: 13.965074
+  type: 'test'
+  ...
+# Subtest: legacy quoted review gets upgraded when quote is unique
+ok 32 - legacy quoted review gets upgraded when quote is unique
+  ---
+  duration_ms: 0.928394
+  type: 'test'
+  ...
+1..32
+# tests 32
+# suites 0
+# pass 32
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 479.953855
+
+
+> heartline-editor@3.5.0 check
+> node --check heartline-db.js && node --check heartline-assets.js && node --check sw.js && find hl-editor -name '*.js' -print0 | xargs -0 -n1 node --check
+

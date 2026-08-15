@@ -1,3 +1,3 @@
-HEARTLINE Editor 3.4 — Project Core + Story Graph 2.1
-Files are stored at ZIP root. Upload them to the repository root.
-Run: npm test && npm run check
+HEARTLINE Editor 3.5 — Proofreading Workspace + Project Core + Story Graph 2.1
+This is a NON-DESTRUCTIVE UPDATE package. Copy files over the existing repository; do not delete unchanged HEARTLINE files.
+After copying run: npm test && npm run check
