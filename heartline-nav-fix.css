@@ -1,0 +1,36 @@
+/* HEARTLINE 3.1.1 — desktop navigation clipping fix */
+@media (min-width: 821px) {
+  /* overflow-x:auto on .main-nav also clips the Y axis in browsers.
+     Desktop navigation fits without scrolling, so dropdowns must be allowed
+     to leave the nav box. */
+  .desktop-nav {
+    overflow: visible !important;
+    scrollbar-width: none;
+    position: relative;
+  }
+
+  .desktop-nav .nav-group {
+    position: relative;
+    overflow: visible;
+    z-index: 100;
+  }
+
+  .desktop-nav .nav-group[open] {
+    z-index: 120;
+  }
+
+  .desktop-nav .nav-group-menu {
+    display: grid;
+    visibility: visible;
+    pointer-events: auto;
+    z-index: 130;
+  }
+
+  .desktop-nav .nav-group:not([open]) .nav-group-menu {
+    display: none;
+  }
+
+  .topbar {
+    overflow: visible;
+  }
+}

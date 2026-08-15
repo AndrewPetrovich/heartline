@@ -1,0 +1,47 @@
+HEARTLINE 3.4 repair kit
+
+Problem
+-------
+Commit d9412af343b39ceafd85390ff4e268b1a2b9a883 contains the Project Core 3.4
+overlay, but the upload also deleted files that the overlay was supposed to
+leave in place.
+
+What this repair does
+---------------------
+It restores ONLY the accidentally deleted files from the last complete 3.3
+commit:
+
+62ca19cd81a93b7379e7203693d03a10a8f5eb0a
+
+It does NOT revert the 3.4 Project Core additions or the intended modifications
+to heartline-db.js, heartline-assets.js, index.html, manifest.webmanifest, sw.js,
+and PACKAGE.txt.
+
+Windows PowerShell
+------------------
+1. Open PowerShell in the root of your local heartline Git checkout.
+2. Copy repair-heartline-3.4.ps1 there.
+3. Run:
+   powershell -ExecutionPolicy Bypass -File .\repair-heartline-3.4.ps1
+4. Review git status.
+5. Commit and push:
+   git add -A
+   git commit -m "Restore HEARTLINE runtime files after 3.4 overlay"
+   git push
+
+macOS/Linux/Git Bash
+--------------------
+1. Copy repair-heartline-3.4.sh to the repository root.
+2. Run:
+   bash ./repair-heartline-3.4.sh
+3. Review git status.
+4. Commit and push:
+   git add -A
+   git commit -m "Restore HEARTLINE runtime files after 3.4 overlay"
+   git push
+
+Important
+---------
+Do not delete the repository contents before applying future updates.
+Future HEARTLINE packages should be treated as full repository-ready packages,
+not overlays.
