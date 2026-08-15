@@ -47,3 +47,25 @@ test('design system never exceeds semibold weight', () => {
   const weights = [...css.matchAll(/font-weight:\s*(\d+)/g)].map(match => Number(match[1]));
   assert.ok(weights.every(weight => weight <= 600));
 });
+
+test('proofreading persistent onboarding callout is removed', () => {
+  assert.doesNotMatch(js, /title:\s*'Есть проблема с фрагментом\?'/);
+  assert.match(js, /hl-proof-review-onboarding'\)\.forEach\(node => node\.remove\(\)\)/);
+});
+
+test('library cards are proofreading-first and use the proofreading service model', () => {
+  assert.match(js, /function proofreadingCardPresentation\(model\)/);
+  assert.match(js, /createProjectProofreadingPanel\(model\)/);
+  assert.match(js, /Готовность вычитки/);
+  assert.match(js, /openReviews/);
+  assert.match(js, /changed/);
+  assert.match(js, /Последняя позиция/);
+  assert.match(css, /\.hl-project-proofreading\{/);
+  assert.match(css, /\.hl-project-proofreading-percent\{font-size:30px!important/);
+});
+
+test('desktop library cards no longer use the four-column micro-card layout', () => {
+  assert.match(css, /grid-template-columns:repeat\(auto-fill,minmax\(360px,420px\)\)!important/);
+  assert.match(css, /\.library-page \.project-card-rich-head h2\{font-size:22px!important/);
+  assert.match(css, /\.library-page \.project-card-rich-foot \.button\{min-height:40px!important/);
+});

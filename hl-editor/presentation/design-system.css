@@ -1,4 +1,4 @@
-/* HEARTLINE Presentation Design System 1.0
+/* HEARTLINE Presentation Design System 1.1
    Visual hierarchy only. No persistence or business rules live here.
 */
 :root{
@@ -86,10 +86,8 @@
 .hl-project-details .project-stats-grid{margin-top:12px}
 .hl-library-next-action{margin-top:2px}
 
-/* Proofreading: contextual onboarding replaces an empty white panel. */
-.hl-proof-review-onboarding{margin:0 0 14px;padding:14px}
-.hl-proof-review-onboarding .hl-action-callout-actions{align-self:flex-end}
-.hl-ds-callout-replaced,.hl-ds-empty-replaced{display:none!important}
+/* Proofreading stays focused on the text. Persistent onboarding callouts are intentionally disabled. */
+.hl-proof-review-onboarding{display:none!important}
 
 /* Storyboard: keep cards readable, show actions only when user engages a card. */
 .frame-card.hl-ds-hover-card{transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
@@ -159,3 +157,80 @@
 .hl-ds-context-hidden{display:none!important}
 .preflight-card.hl-action-callout{flex-wrap:wrap!important}
 .preflight-card.hl-action-callout>div:first-child{flex:1;min-width:280px}
+
+
+/* 3.6.1 Library proofreading-first cards. */
+.library-page .rich-project-list{
+  grid-template-columns:repeat(auto-fill,minmax(360px,420px))!important;
+  justify-content:start!important;
+  align-items:start!important;
+  gap:18px!important;
+}
+.library-page .project-card-rich{
+  display:flex!important;
+  flex-direction:column!important;
+  min-height:0!important;
+  height:auto!important;
+  border-radius:16px!important;
+}
+.library-page .project-cover{
+  height:188px!important;
+  min-height:188px!important;
+  border-right:0!important;
+  border-bottom:1px solid var(--line)!important;
+}
+.library-page .project-cover-placeholder{padding:20px 18px!important}
+.library-page .project-cover-placeholder span{font-size:10px!important}
+.library-page .project-cover-placeholder strong{font-size:24px!important;max-width:94%!important}
+.library-page .project-card-rich-body{padding:18px!important;min-height:0!important;flex:0 0 auto!important}
+.library-page .project-card-rich-head h2{font-size:22px!important;line-height:1.18!important;margin-top:5px!important}
+.library-page .project-card-rich-head .kicker{font-size:11px!important}
+.library-page .project-menu-button{width:36px!important;height:36px!important;min-width:36px!important;font-size:18px!important}
+.library-page .project-version-row{margin-top:9px!important;font-size:12px!important;line-height:1.4!important}
+.library-page .project-version-row time{font-size:12px!important}
+.library-page .project-summary-row{margin:12px 0 14px!important;gap:8px!important;font-size:12px!important;line-height:1.45!important}
+.library-page .project-card-rich-foot{margin-top:14px!important;padding-top:0!important;gap:10px!important}
+.library-page .project-card-rich-foot>span{font-size:12px!important;line-height:1.35!important;white-space:normal!important}
+.library-page .project-card-rich-foot .button{min-height:40px!important;height:auto!important;font-size:13px!important;border-radius:9px!important}
+.library-page .hl-project-details{margin-top:13px!important}
+.library-page .hl-project-details>summary{font-size:13px!important;min-height:42px!important;padding:10px 12px!important}
+.library-page .hl-project-details .project-stats-grid{margin-top:12px!important}
+.library-page .hl-project-details .project-production-row{margin:12px 0 0!important;padding:10px 0 0!important}
+.library-page .hl-project-details .project-stat-label{font-size:10px!important}
+.library-page .hl-project-details .project-stat-tile>small{font-size:9px!important}
+
+.hl-project-proofreading{
+  margin:2px 0 0;
+  padding:14px;
+  border:1px solid #dfe3e6;
+  border-radius:12px;
+  background:#fafbfb;
+}
+.hl-project-proofreading-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px}
+.hl-project-proofreading-head>div{display:grid;gap:3px;min-width:0}
+.hl-project-proofreading-head span{font-size:11px;line-height:1.3;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.hl-project-proofreading-head strong{font-size:16px!important;line-height:1.25;color:var(--text)}
+.hl-project-proofreading-percent{font-size:30px!important;line-height:1;color:#202522;letter-spacing:-.03em}
+.hl-project-proofreading-progress{height:8px;margin:11px 0 8px;border-radius:999px;background:#e4e7e5;overflow:hidden}
+.hl-project-proofreading-progress i{display:block;height:100%;border-radius:inherit;background:#62706a;transition:width .2s ease}
+.hl-project-proofreading-completion{margin:0;color:#5f6662;font-size:12px!important;line-height:1.45}
+.hl-project-proofreading-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px;margin-top:12px}
+.hl-project-proofreading-metrics>div{display:grid;gap:2px;padding:9px 8px;border-radius:9px;background:#fff;border:1px solid #e4e7e5}
+.hl-project-proofreading-metrics strong{font-size:17px!important;line-height:1.1;color:#242925}
+.hl-project-proofreading-metrics span{font-size:10px!important;line-height:1.25;color:var(--muted)}
+.hl-project-proofreading-location{display:grid;gap:3px;margin-top:11px;padding-top:10px;border-top:1px solid #e2e5e3}
+.hl-project-proofreading-location span{font-size:10px!important;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.hl-project-proofreading-location strong{font-size:12px!important;line-height:1.4;color:#343a36;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hl-project-proofreading[data-status="reviewed"]{background:var(--hl-ds-success-soft);border-color:var(--hl-ds-success-line)}
+.hl-project-proofreading[data-status="reviewed"] .hl-project-proofreading-progress i{background:var(--hl-ds-success)}
+.hl-project-proofreading[data-status="attention"]{background:var(--hl-ds-warning-soft);border-color:var(--hl-ds-warning-line)}
+.hl-project-proofreading[data-status="attention"] .hl-project-proofreading-progress i{background:#b56d08}
+.hl-project-proofreading[data-status="in-progress"] .hl-project-proofreading-progress i{background:var(--hl-ds-accent)}
+.hl-project-proofreading[data-status="unavailable"]{background:#f7f8f9;color:var(--muted)}
+
+@media(max-width:820px){
+  .library-page .rich-project-list{grid-template-columns:1fr!important}
+  .library-page .project-card-rich{width:100%!important;max-width:none!important}
+  .library-page .project-cover{height:220px!important;min-height:220px!important}
+  .hl-project-proofreading-percent{font-size:28px!important}
+}

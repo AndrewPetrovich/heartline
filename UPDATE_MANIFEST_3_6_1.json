@@ -1,0 +1,24 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.6.1",
+  "baseCommit": "f263a242d4e7d611d1eb5a42bd50352a62013015",
+  "mode": "non-destructive-update",
+  "replace": [
+    "PACKAGE.txt",
+    "index.html",
+    "package.json",
+    "sw.js",
+    "hl-editor/presentation/design-system.js",
+    "hl-editor/presentation/design-system.css",
+    "tests/design-system.test.js"
+  ],
+  "add": [
+    "APPLY_3_6_1.md",
+    "README_v361.txt",
+    "QA_DESIGN_SYSTEM_3_6_1.md",
+    "VALIDATION_3_6_1.txt",
+    "UPDATE_MANIFEST_3_6_1.json",
+    "SHA256SUMS_3_6_1.txt"
+  ],
+  "delete": []
+}

@@ -1,0 +1,29 @@
+HEARTLINE 3.6.1 validation
+==========================
+
+Base commit:
+f263a242d4e7d611d1eb5a42bd50352a62013015
+
+npm test
+--------
+56 tests
+56 pass
+0 fail
+
+npm run check
+-------------
+PASS
+Typography/UI simplification policy: PASS
+
+Validated UX changes
+--------------------
+PASS - proofreading onboarding callout removed
+PASS - compact normal review workflow preserved
+PASS - Library readiness uses ProofreadingService data
+PASS - readiness percent + status + remaining + open reviews + changed shown
+PASS - last proofreading position shown
+PASS - structural/production data demoted to disclosure
+PASS - four-column micro-card layout overridden
+PASS - 560px artificial minimum card height removed
+PASS - Library visible typography enlarged
+PASS - no business/persistence changes

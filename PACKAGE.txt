@@ -1,3 +1,3 @@
-HEARTLINE Editor 3.6 — Presentation Design System
-UX/UI-only architectural pass over 3.5.2 readability baseline.
+HEARTLINE Editor 3.6.1 — Proofreading-first Library Cards
+Presentation-only refinement over HEARTLINE 3.6.
 Run: npm run verify-repository && npm test && npm run check

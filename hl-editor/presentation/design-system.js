@@ -75,76 +75,156 @@ async function openProjectInProofreading(projectId) {
   await window.HEARTLINEProofreading?.open?.();
 }
 
+function proofreadingCardPresentation(model) {
+  const progress = model?.progress || { total: 0, completed: 0, percent: 0, counts: {} };
+  const attention = Number(progress.counts?.attention || 0);
+  const changed = Number(progress.counts?.changed || 0);
+  const openReviews = (model?.units || []).reduce((sum, unit) => sum + Number(unit.openReviewCount || 0), 0);
+  const remaining = Math.max(0, Number(progress.total || 0) - Number(progress.completed || 0));
+  let status = 'not-started';
+  let label = 'Вычитка не начата';
+  if (attention || changed) { status = 'attention'; label = 'Требует внимания'; }
+  else if (progress.total && progress.percent === 100) { status = 'reviewed'; label = 'Вычитано'; }
+  else if (progress.completed || progress.percent > 0) { status = 'in-progress'; label = 'Вычитка в работе'; }
+  const selected = (model?.units || []).find(unit => unit.fragmentId === model?.workspace?.selectedFragmentId)
+    || (model?.units || []).find(unit => !['reviewed', 'approved'].includes(unit.status))
+    || model?.units?.[0]
+    || null;
+  return {
+    status, label,
+    percent: Number(progress.percent || 0),
+    completed: Number(progress.completed || 0),
+    total: Number(progress.total || 0),
+    remaining, openReviews, attention, changed,
+    location: selected ? `${selected.chapterTitle} · ${selected.sceneTitle}` : 'Позиция не выбрана'
+  };
+}
+
+function createProjectProofreadingPanel(model) {
+  const info = proofreadingCardPresentation(model);
+  const node = document.createElement('section');
+  node.className = 'hl-project-proofreading';
+  node.dataset.status = info.status;
+  node.dataset.percent = String(info.percent);
+  node.dataset.openReviews = String(info.openReviews);
+  node.dataset.changed = String(info.changed);
+  node.innerHTML = `<div class="hl-project-proofreading-head"><div><span>Готовность вычитки</span><strong></strong></div><b class="hl-project-proofreading-percent"></b></div>
+    <div class="hl-project-proofreading-progress" aria-hidden="true"><i></i></div>
+    <p class="hl-project-proofreading-completion"></p>
+    <div class="hl-project-proofreading-metrics"><div><strong></strong><span>осталось</span></div><div><strong></strong><span>замечаний</span></div><div><strong></strong><span>изменено</span></div></div>
+    <div class="hl-project-proofreading-location"><span>Последняя позиция</span><strong></strong></div>`;
+  node.querySelector('.hl-project-proofreading-head strong').textContent = info.label;
+  node.querySelector('.hl-project-proofreading-percent').textContent = `${info.percent}%`;
+  node.querySelector('.hl-project-proofreading-progress i').style.width = `${Math.max(0, Math.min(100, info.percent))}%`;
+  node.querySelector('.hl-project-proofreading-completion').textContent = info.total
+    ? `${info.completed} из ${info.total} фрагментов проверено`
+    : 'В проекте нет доступных текстовых фрагментов';
+  const metrics = node.querySelectorAll('.hl-project-proofreading-metrics strong');
+  metrics[0].textContent = String(info.remaining);
+  metrics[1].textContent = String(info.openReviews);
+  metrics[2].textContent = String(info.changed);
+  node.querySelector('.hl-project-proofreading-location strong').textContent = info.location;
+  return { node, info };
+}
+
 async function enhanceLibrary() {
   const page = document.querySelector('.library-page');
   if (!page || page.dataset.hlDsPending === '1' || page.dataset.hlDsEnhanced === '1') return;
   page.dataset.hlDsPending = '1';
-  page.querySelector('.page-header .kicker')?.replaceChildren(document.createTextNode('HEARTLINE'));
-  const headerCopy = page.querySelector('.page-header p');
-  if (headerCopy) headerCopy.textContent = 'Продолжайте вычитку, управляйте проектами и открывайте дополнительные инструменты только когда они нужны.';
-  page.querySelector('.library-sync-note')?.classList.add('hl-inline-notice');
-  page.querySelectorAll('.page-header .header-actions .button.primary').forEach(button => {
-    button.classList.remove('primary');
-    button.classList.add('secondary');
-  });
-
-  const cards = [...page.querySelectorAll('[data-project-card]')];
-  for (const card of cards) {
-    if (card.dataset.hlDsCard === '1') continue;
-    card.dataset.hlDsCard = '1';
-    const stats = card.querySelector('.project-stats-grid');
-    if (stats) {
-      const { details, body } = createDisclosure('Структура и статистика', 'hl-project-details');
-      stats.parentElement.insertBefore(details, stats);
-      body.appendChild(stats);
-    }
-    const open = card.querySelector('[data-open-project]');
-    if (open) {
-      open.classList.remove('primary');
-      open.classList.add('secondary');
-      open.textContent = 'Открыть';
-    }
-    const footerCopy = card.querySelector('.project-card-rich-foot .muted');
-    if (footerCopy) footerCopy.textContent = 'Последняя рабочая позиция сохранена';
-  }
-
-  const card = firstProjectCard();
-  if (card && !page.querySelector('.hl-library-next-action')) {
-    const projectId = card.dataset.projectCard;
-    const projectTitle = card.querySelector('h2')?.textContent?.trim() || 'Проект';
-    let title = 'Продолжить вычитку';
-    let body = `${projectTitle} — открыть последнюю рабочую позицию.`;
-    let tone = 'info';
-    try {
-      const model = await window.HEARTLINEProofreading?.service?.load?.(projectId);
-      if (!page.isConnected) return;
-      if (model?.progress) {
-        const selected = model.units?.find(unit => unit.fragmentId === model.workspace?.selectedFragmentId) || model.units?.[0];
-        const location = selected ? `${selected.chapterTitle} · ${selected.sceneTitle}` : 'последняя позиция';
-        const openIssues = Number(model.progress.counts?.attention || 0);
-        const changed = Number(model.progress.counts?.changed || 0);
-        body = `${projectTitle}: ${model.progress.percent}% вычитано · ${location}${openIssues ? ` · ${openIssues} с замечаниями` : ''}${changed ? ` · ${changed} изменено после вычитки` : ''}.`;
-        if (model.progress.percent === 100 && !openIssues && !changed) {
-          title = 'Вычитка завершена';
-          body = `${projectTitle} полностью пройдена. Можно открыть проект для финальной проверки или экспорта.`;
-          tone = 'success';
-        }
-      }
-    } catch (_) {}
-    const callout = createActionCallout({
-      tone,
-      eyebrow: 'Следующее действие',
-      title,
-      body,
-      actionLabel: title === 'Вычитка завершена' ? 'Открыть проект' : 'Продолжить →',
-      onAction: () => openProjectInProofreading(projectId)
+  try {
+    page.querySelector('.page-header .kicker')?.replaceChildren(document.createTextNode('HEARTLINE'));
+    const headerCopy = page.querySelector('.page-header p');
+    if (headerCopy) headerCopy.textContent = 'Продолжайте вычитку, управляйте проектами и открывайте дополнительные инструменты только когда они нужны.';
+    page.querySelector('.library-sync-note')?.classList.add('hl-inline-notice');
+    page.querySelectorAll('.page-header .header-actions .button.primary').forEach(button => {
+      button.classList.remove('primary');
+      button.classList.add('secondary');
     });
-    callout.classList.add('hl-library-next-action');
-    const toolbar = page.querySelector('.library-toolbar');
-    page.insertBefore(callout, toolbar || page.querySelector('.project-list'));
+
+    const service = window.HEARTLINEProofreading?.service;
+    const cards = [...page.querySelectorAll('[data-project-card]')];
+    await Promise.all(cards.map(async card => {
+      if (card.dataset.hlDsCard === '2') return;
+      card.dataset.hlDsCard = '2';
+      const stats = card.querySelector('.project-stats-grid');
+      const production = card.querySelector('.project-production-row');
+      let details = card.querySelector('.hl-project-details');
+      let detailsBody = details?.querySelector('.hl-ds-disclosure-body') || null;
+      if (!details && (stats || production)) {
+        const disclosure = createDisclosure('Структура и производство', 'hl-project-details');
+        details = disclosure.details;
+        detailsBody = disclosure.body;
+        const anchor = stats || production;
+        anchor.parentElement.insertBefore(details, anchor);
+      }
+      if (detailsBody && stats && stats.parentElement !== detailsBody) detailsBody.appendChild(stats);
+      if (detailsBody && production && production.parentElement !== detailsBody) detailsBody.appendChild(production);
+
+      card.querySelector('.hl-project-proofreading')?.remove();
+      try {
+        const model = await service?.load?.(card.dataset.projectCard);
+        if (!card.isConnected || !model) return;
+        const { node } = createProjectProofreadingPanel(model);
+        const anchor = details || card.querySelector('.project-card-rich-foot');
+        anchor?.parentElement?.insertBefore(node, anchor || null);
+      } catch (_) {
+        const unavailable = document.createElement('section');
+        unavailable.className = 'hl-project-proofreading';
+        unavailable.dataset.status = 'unavailable';
+        unavailable.innerHTML = '<div class="hl-project-proofreading-head"><div><span>Готовность вычитки</span><strong>Статус недоступен</strong></div></div><p class="hl-project-proofreading-completion">Откройте проект, чтобы обновить состояние вычитки.</p>';
+        const anchor = details || card.querySelector('.project-card-rich-foot');
+        anchor?.parentElement?.insertBefore(unavailable, anchor || null);
+      }
+
+      const open = card.querySelector('[data-open-project]');
+      if (open) {
+        open.classList.remove('primary');
+        open.classList.add('secondary');
+        open.textContent = 'Открыть проект';
+      }
+      const footerCopy = card.querySelector('.project-card-rich-foot .muted');
+      if (footerCopy) footerCopy.textContent = 'Рабочая позиция сохранена';
+    }));
+
+    const card = firstProjectCard();
+    if (card && !page.querySelector('.hl-library-next-action')) {
+      const projectId = card.dataset.projectCard;
+      const projectTitle = card.querySelector('h2')?.textContent?.trim() || 'Проект';
+      let title = 'Продолжить вычитку';
+      let body = `${projectTitle} — открыть последнюю рабочую позицию.`;
+      let tone = 'info';
+      try {
+        const model = await service?.load?.(projectId);
+        if (!page.isConnected) return;
+        if (model?.progress) {
+          const info = proofreadingCardPresentation(model);
+          body = `${projectTitle}: ${info.percent}% вычитано · ${info.location}${info.openReviews ? ` · ${info.openReviews} открытых замечаний` : ''}${info.changed ? ` · ${info.changed} изменено после вычитки` : ''}.`;
+          if (info.status === 'reviewed') {
+            title = 'Вычитка завершена';
+            body = `${projectTitle} полностью пройдена. Можно открыть проект для финальной проверки или экспорта.`;
+            tone = 'success';
+          } else if (info.status === 'attention') {
+            title = 'Продолжить вычитку';
+            tone = 'warning';
+          }
+        }
+      } catch (_) {}
+      const callout = createActionCallout({
+        tone,
+        eyebrow: 'Следующее действие',
+        title,
+        body,
+        actionLabel: title === 'Вычитка завершена' ? 'Открыть проект' : 'Продолжить →',
+        onAction: () => openProjectInProofreading(projectId)
+      });
+      callout.classList.add('hl-library-next-action');
+      const toolbar = page.querySelector('.library-toolbar');
+      page.insertBefore(callout, toolbar || page.querySelector('.project-list'));
+    }
+    page.dataset.hlDsEnhanced = '1';
+  } finally {
+    page.dataset.hlDsPending = '0';
   }
-  page.dataset.hlDsPending = '0';
-  page.dataset.hlDsEnhanced = '1';
 }
 
 function enhanceStoryboard() {
@@ -325,25 +405,9 @@ function enhanceProofreading() {
     meta.textContent = parts.join(' · ');
     meta.dataset.hlDsClean = '1';
   }
-  const rightBody = shell.querySelector('#hlProofRightBody');
-  const rightTitle = shell.querySelector('#hlProofRightTitle')?.textContent?.trim();
-  if (!rightBody || rightTitle !== 'Замечания' || rightBody.dataset.hlDsProof === '1') return;
-  rightBody.dataset.hlDsProof = '1';
-  if (rightBody.querySelector('.hl-proof-review-card')) return;
-  const add = rightBody.querySelector('#hlProofAddReview');
-  if (!add) return;
-  add.classList.add('hl-ds-callout-replaced');
-  rightBody.querySelector('.hl-proof-empty')?.classList.add('hl-ds-empty-replaced');
-  const callout = createActionCallout({
-    tone: 'info',
-    eyebrow: 'Замечание к тексту',
-    title: 'Есть проблема с фрагментом?',
-    body: 'Выделите конкретный текст перед созданием замечания — так оно останется устойчиво привязано к нужному месту.',
-    actionLabel: '+ Добавить замечание',
-    onAction: () => add.click()
-  });
-  callout.classList.add('hl-proof-review-onboarding');
-  rightBody.prepend(callout);
+  shell.querySelectorAll('.hl-proof-review-onboarding').forEach(node => node.remove());
+  shell.querySelector('#hlProofAddReview')?.classList.remove('hl-ds-callout-replaced');
+  shell.querySelector('#hlProofRightBody .hl-proof-empty')?.classList.remove('hl-ds-empty-replaced');
 }
 
 function enhanceTopbar() {
@@ -380,4 +444,4 @@ observer.observe(document.documentElement, { childList: true, subtree: true, att
 document.addEventListener('click', scheduleEnhance, true);
 scheduleEnhance();
 
-window.HEARTLINEDesignSystem = Object.freeze({ enhance: scheduleEnhance, version: '1.0.0' });
+window.HEARTLINEDesignSystem = Object.freeze({ enhance: scheduleEnhance, version: '1.1.0' });

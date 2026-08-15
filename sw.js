@@ -1,4 +1,4 @@
-const CACHE='heartline-editor-3.6.0-design-system';
+const CACHE='heartline-editor-3.6.1-proofreading-library-cards';
 const CORE=[
   './','./index.html','./heartline-app.css','./heartline-typography.css','./heartline-nav-fix.css','./heartline-reader-cleanup.css','./heartline-library-cards.css','./heartline-reader-hierarchy.css','./heartline-graph2.css',
   './heartline-app.js','./heartline-nav-fix.js','./heartline-project-stats.js','./heartline-graph.js','./heartline-graph-model.js','./heartline-graph-analysis.js','./heartline-graph-layout.js','./heartline-graph-layout-worker.js','./heartline-graph-renderers.js','./heartline-graph-navigation.js',
