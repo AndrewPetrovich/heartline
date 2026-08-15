@@ -27,3 +27,10 @@ body.hl-proofreading-active{overflow:hidden}.hl-proofreading-shell{height:calc(1
 .hl-proof-checkbox{grid-template-columns:auto 1fr!important;align-items:center}.hl-proof-checkbox input{width:auto!important}
 .hl-proof-toast{position:fixed;left:50%;bottom:76px;transform:translate(-50%,14px);z-index:2000;opacity:0;pointer-events:none;max-width:min(620px,calc(100vw - 24px));padding:9px 12px;border-radius:10px;background:#202020;color:#fff;font:12px/1.4 system-ui;box-shadow:0 12px 35px rgba(0,0,0,.2);transition:.16s}.hl-proof-toast.visible{opacity:1;transform:translate(-50%,0)}.hl-proof-toast[data-kind="attention"]{background:#8a4b2c}.hl-proof-toast[data-kind="success"]{background:#356b4b}
 @media(max-width:720px){.hl-proof-reader-nav{position:sticky;bottom:0;overflow-x:auto;justify-content:flex-start;padding-bottom:max(10px,env(safe-area-inset-bottom))}.hl-proof-reader-nav .button{min-width:auto;white-space:nowrap}.hl-proof-reader-nav span{white-space:nowrap}.hl-proof-center{padding-bottom:12px}.hl-proof-toolbar{top:0}.hl-proof-quality-grid{grid-template-columns:repeat(2,1fr)}}
+
+
+/* 3.5.2 simplified proofreading side panel */
+.hl-proof-right-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(0,0,0,.1);background:#fff;position:sticky;top:0;z-index:4}
+.hl-proof-right-head strong{font-size:12px}
+.hl-proof-right-close{display:none}
+@media(max-width:1050px){.hl-proof-right-close{display:inline-flex}}

@@ -1,0 +1,33 @@
+/* HEARTLINE 3.5.2 typography policy
+   The UI intentionally uses no bold/extra-bold faces.
+   400 = body text; 600 = strongest permitted emphasis (semibold).
+   !important is deliberate: legacy 3.x modules contain 650–850 weights.
+*/
+html,body{font-synthesis:none}
+html body *{font-weight:400!important}
+html body :is(
+  h1,h2,h3,h4,h5,h6,strong,b,button,summary,th,
+  .kicker,.status-badge,.brand-mark,.chapter-title,.scene-link.active,
+  .reader-title strong,.scene-cue strong,.current-frame .speaker,
+  .inspector-tab.active,.hl-proof-title strong,.hl-proof-metric strong,
+  .hl-proof-chapter>summary strong,.hl-proof-scene-head strong,
+  .hl-proof-editor-head h2,.hl-proof-right-head strong,
+  .hl-proof-review-card strong,.hl-proof-finding strong,
+  .hl-proof-section-title h3,.hl-proof-route-coverage h3,
+  .hl-proof-dialog-head h2,.hl-proof-quality-score>strong,
+  .hl-proof-quality-score b,.hl-proof-quality-grid b,
+  .hl-proof-choice-options>span
+){font-weight:600!important}
+html body :is(
+  h1,h2,h3,h4,h5,h6,strong,b,button,summary,th,
+  .kicker,.status-badge,.brand-mark,.chapter-title,.scene-link.active,
+  .reader-title strong,.scene-cue strong,.current-frame .speaker,
+  .inspector-tab.active,.hl-proof-title strong,.hl-proof-metric strong,
+  .hl-proof-chapter>summary strong,.hl-proof-scene-head strong,
+  .hl-proof-editor-head h2,.hl-proof-right-head strong,
+  .hl-proof-review-card strong,.hl-proof-finding strong,
+  .hl-proof-section-title h3,.hl-proof-route-coverage h3,
+  .hl-proof-dialog-head h2,.hl-proof-quality-score>strong,
+  .hl-proof-quality-score b,.hl-proof-quality-grid b,
+  .hl-proof-choice-options>span
+) *{font-weight:inherit!important}

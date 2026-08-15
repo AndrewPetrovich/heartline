@@ -230,7 +230,7 @@ function editorHtml() {
     ${contextHtml(unit, -1)}
     <header class="hl-proof-editor-head"><div><span class="kicker">ВЫЧИТКА</span><h2>${esc(`${unit.chapterTitle} · ${unit.sceneTitle}`)}</h2><p>${esc(`${unit.type}${unit.speaker ? ` · ${unit.speaker}` : ''} · ${unit.fragmentId}`)}</p></div><span id="hlProofStatus" class="hl-proof-status-pill" data-status="${esc(unit.status)}">${esc(statusLabel(unit.status))}</span></header>
     <div class="hl-proof-editor-wrap"><textarea id="hlProofEditor" class="hl-proof-editor" spellcheck="true">${esc(unit.text)}</textarea><div class="hl-proof-highlight-note">Выделите текст и нажмите «Замечание». Кнопка «Вперёд» автоматически отмечает текущий фрагмент вычитанным, если у него нет открытых замечаний.</div>${choiceOptionsHtml(unit)}</div>
-    <div class="hl-proof-editor-actions"><button id="hlProofReview" class="button secondary small">Замечание</button><button id="hlProofRunChecks" class="button secondary small">Проверить текст</button><span id="hlProofSaveState" class="hl-proof-save-state">${esc(model.workspace.saveState || 'saved')}</span></div>
+    <div class="hl-proof-editor-actions"><button id="hlProofReview" class="button secondary small">Замечание</button><span id="hlProofSaveState" class="hl-proof-save-state">${esc(model.workspace.saveState || 'saved')}</span></div>
     ${contextHtml(unit, 1)}
   </article>`;
 }
@@ -250,7 +250,7 @@ function reviewsHtml() {
 }
 
 function findingsListHtml() {
-  return currentFindings.length ? currentFindings.map((finding, index) => `<article class="hl-proof-finding" data-severity="${esc(finding.severity)}"><header><strong>${esc(finding.message)}</strong><span class="hl-proof-finding-code">${esc(finding.code)}</span></header><p>Позиция ${finding.startOffset}–${finding.endOffset}</p><div class="hl-proof-inline">${finding.replacement != null ? `<button class="hl-proof-small-button primary" data-finding-fix="${index}">Исправить</button>` : ''}<button class="hl-proof-small-button" data-finding-review="${index}">В замечание</button><button class="hl-proof-small-button" data-finding-ignore="${index}">Игнорировать</button></div></article>`).join('') : '<div class="hl-proof-empty compact">Нажмите «Проверить текст» для локальной проверки текущего фрагмента.</div>';
+  return currentFindings.length ? currentFindings.map((finding, index) => `<article class="hl-proof-finding" data-severity="${esc(finding.severity)}"><header><strong>${esc(finding.message)}</strong><span class="hl-proof-finding-code">${esc(finding.code)}</span></header><p>Позиция ${finding.startOffset}–${finding.endOffset}</p><div class="hl-proof-inline">${finding.replacement != null ? `<button class="hl-proof-small-button primary" data-finding-fix="${index}">Исправить</button>` : ''}<button class="hl-proof-small-button" data-finding-review="${index}">В замечание</button><button class="hl-proof-small-button" data-finding-ignore="${index}">Игнорировать</button></div></article>`).join('') : '<div class="hl-proof-empty compact">Локальная проверка доступна в разделе «Стиль и качество» для текущего фрагмента.</div>';
 }
 
 function qualityReportHtml() {
@@ -276,7 +276,8 @@ function dictionaryHtml() {
     <div class="hl-proof-form" style="margin-top:12px"><label>Нежелательные слова/формы<textarea id="hlProofForbidden">${esc(dictionary.forbiddenWords.join('\n'))}</textarea></label><button id="hlProofSaveForbidden" class="hl-proof-small-button">Сохранить список</button></div>`;
 }
 
-function rightBodyHtml() { return rightTab === 'quality' ? qualityHtml() : rightTab === 'dictionary' ? dictionaryHtml() : reviewsHtml(); }
+function rightBodyHtml() { return rightTab === 'quality' ? qualityHtml() : reviewsHtml(); }
+function rightTitleLabel() { return rightTab === 'quality' ? 'Стиль и качество' : 'Замечания'; }
 
 function readerNavHtml() {
   const index = model.units.findIndex(item => item.fragmentId === selectedFragmentId);
@@ -289,7 +290,7 @@ function renderWorkspace() {
   const view = $('view');
   const unit = currentUnit();
   view.className = 'view';
-  view.innerHTML = `<section class="hl-proofreading-shell ${readerPrefs.focus ? 'hl-proof-focus' : ''}"><header class="hl-proof-toolbar"><div class="hl-proof-title"><strong>Вычитка · ${esc(model.project.title)}</strong><span>Чтение, редактура и оценка стиля в одном рабочем режиме</span></div>${progressHtml(model.progress)}<button id="hlProofPending" class="button secondary small">К непроверенному</button><button id="hlProofSearch" class="button secondary small">Поиск / замена</button><button id="hlProofQuality" class="button secondary small">Стиль и качество</button><button id="hlProofView" class="button secondary small">Вид</button><button id="hlProofRightToggle" class="button secondary small hl-proof-right-toggle">Панель</button></header><div class="hl-proof-grid"><aside class="hl-proof-pane hl-proof-outline">${outlineHtml()}</aside><main class="hl-proof-pane hl-proof-center">${editorHtml()}</main><aside id="hlProofRight" class="hl-proof-pane hl-proof-right"><div class="hl-proof-right-tabs"><button data-proof-tab="reviews" class="${rightTab === 'reviews' ? 'active' : ''}">Замечания</button><button data-proof-tab="quality" class="${rightTab === 'quality' ? 'active' : ''}">Качество</button><button data-proof-tab="dictionary" class="${rightTab === 'dictionary' ? 'active' : ''}">Словарь</button></div><div id="hlProofRightBody" class="hl-proof-right-body">${rightBodyHtml()}</div></aside></div>${readerNavHtml()}</section>`;
+  view.innerHTML = `<section class="hl-proofreading-shell ${readerPrefs.focus ? 'hl-proof-focus' : ''}"><header class="hl-proof-toolbar"><div class="hl-proof-title"><strong>Вычитка · ${esc(model.project.title)}</strong><span>Чтение, редактура и оценка стиля в одном рабочем режиме</span></div>${progressHtml(model.progress)}<button id="hlProofPending" class="button secondary small">К непроверенному</button><button id="hlProofSearch" class="button secondary small">Поиск / замена</button><button id="hlProofQuality" class="button secondary small">Стиль и качество</button><button id="hlProofView" class="button secondary small">Вид</button><button id="hlProofRightToggle" class="button secondary small hl-proof-right-toggle">Панель</button></header><div class="hl-proof-grid"><aside class="hl-proof-pane hl-proof-outline">${outlineHtml()}</aside><main class="hl-proof-pane hl-proof-center">${editorHtml()}</main><aside id="hlProofRight" class="hl-proof-pane hl-proof-right"><div class="hl-proof-right-head"><strong id="hlProofRightTitle">${esc(rightTitleLabel())}</strong><button id="hlProofRightClose" class="hl-proof-small-button hl-proof-right-close" type="button" aria-label="Закрыть панель">×</button></div><div id="hlProofRightBody" class="hl-proof-right-body">${rightBodyHtml()}</div></aside></div>${readerNavHtml()}</section>`;
   applyReaderPreferences();
   wireWorkspace(unit);
 }
@@ -392,8 +393,12 @@ function wireWorkspace(unit) {
   $('hlProofSearch')?.addEventListener('click', openSearchDialog);
   $('hlProofQuality')?.addEventListener('click', async () => { rightTab = 'quality'; renderRight(); $('hlProofRight')?.classList.add('open'); });
   $('hlProofView')?.addEventListener('click', openViewDialog);
-  $('hlProofRightToggle')?.addEventListener('click', () => $('hlProofRight')?.classList.toggle('open'));
-  document.querySelectorAll('[data-proof-tab]').forEach(button => button.onclick = () => { rightTab = button.dataset.proofTab; renderRight(); });
+  $('hlProofRightToggle')?.addEventListener('click', () => {
+    rightTab = 'reviews';
+    renderRight();
+    $('hlProofRight')?.classList.toggle('open');
+  });
+  $('hlProofRightClose')?.addEventListener('click', () => $('hlProofRight')?.classList.remove('open'));
   wireRight();
 }
 
@@ -406,7 +411,8 @@ function proofreadingHotkeys(event) {
 function renderRight() {
   const body = $('hlProofRightBody');
   if (!body) return;
-  document.querySelectorAll('[data-proof-tab]').forEach(button => button.classList.toggle('active', button.dataset.proofTab === rightTab));
+  const title = $('hlProofRightTitle');
+  if (title) title.textContent = rightTitleLabel();
   body.innerHTML = rightBodyHtml();
   wireRight();
 }
@@ -436,7 +442,6 @@ function wireRight() {
   $('hlProofReviewSave')?.addEventListener('click', saveReviewForm);
   document.querySelectorAll('[data-proof-review-status]').forEach(select => select.onchange = async () => { await getService().updateReviewWorkflow(select.dataset.proofReviewStatus, select.value); await reloadModel({ keepSelection: true, render: false }); renderRight(); updateCurrentStatus(); });
   document.querySelectorAll('[data-proof-anchor]').forEach(node => node.onclick = () => focusReviewAnchor(node.dataset.proofAnchor));
-  $('hlProofRunChecks')?.addEventListener('click', runChecks);
   $('hlProofRefreshFindings')?.addEventListener('click', runChecks);
   document.querySelectorAll('[data-finding-fix]').forEach(button => button.onclick = () => applyFinding(Number(button.dataset.findingFix)));
   document.querySelectorAll('[data-finding-review]').forEach(button => button.onclick = () => findingToReview(Number(button.dataset.findingReview)));

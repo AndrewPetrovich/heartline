@@ -1,6 +1,6 @@
-const CACHE='heartline-editor-3.5.1-reader-proofreading';
+const CACHE='heartline-editor-3.5.2-typography-cleanup';
 const CORE=[
-  './','./index.html','./heartline-app.css','./heartline-nav-fix.css','./heartline-reader-cleanup.css','./heartline-library-cards.css','./heartline-reader-hierarchy.css','./heartline-graph2.css',
+  './','./index.html','./heartline-app.css','./heartline-typography.css','./heartline-nav-fix.css','./heartline-reader-cleanup.css','./heartline-library-cards.css','./heartline-reader-hierarchy.css','./heartline-graph2.css',
   './heartline-app.js','./heartline-nav-fix.js','./heartline-project-stats.js','./heartline-graph.js','./heartline-graph-model.js','./heartline-graph-analysis.js','./heartline-graph-layout.js','./heartline-graph-layout-worker.js','./heartline-graph-renderers.js','./heartline-graph-navigation.js',
   './heartline-engine.js','./heartline-db.js','./heartline-domain.js','./heartline-assets.js','./heartline-image-worker.js','./heartline-player-renderer.js','./heartline-parser.js','./heartline-exporter.js',
   './hl-editor/index.js','./hl-editor/config.js','./hl-editor/domain/project.js','./hl-editor/domain/archive-policy.js','./hl-editor/application/project-service.js','./hl-editor/application/import-service.js','./hl-editor/ports/source-project-adapter.js','./hl-editor/ports/context-repository.js','./hl-editor/infrastructure/browser-hash-service.js','./hl-editor/infrastructure/browser-fs-source-adapter.js','./hl-editor/infrastructure/browser-context-repository.js','./hl-editor/presentation/bridge.js',

@@ -1,0 +1,27 @@
+HEARTLINE 3.5.2 validation
+===========================
+
+Base verified against GitHub commit:
+efef2019f9d58a64cc95833493776d817ab0df71
+
+npm test
+--------
+40 tests
+40 pass
+0 fail
+
+npm run check
+-------------
+PASS
+Typography/UI simplification policy: PASS
+
+Validated changes
+-----------------
+PASS - standalone «Проверить текст» button removed
+PASS - right pane has no Checks/Quality tab
+PASS - right pane has no Dictionary tab
+PASS - Style & Quality remains available from top toolbar
+PASS - project dictionary data model remains backward-compatible
+PASS - global UI weight cap = 600
+PASS - synthetic bold disabled
+PASS - existing source-save/recovery/conflict tests retained

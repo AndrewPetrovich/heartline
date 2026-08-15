@@ -1,0 +1,25 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.5.2",
+  "baseCommit": "efef2019f9d58a64cc95833493776d817ab0df71",
+  "mode": "non-destructive-update",
+  "replace": [
+    "PACKAGE.txt",
+    "index.html",
+    "package.json",
+    "sw.js",
+    "hl-editor/proofreading/presentation/proofreading-workspace.js",
+    "hl-editor/proofreading/presentation/proofreading.css",
+    "tools/verify-repository.mjs"
+  ],
+  "add": [
+    "heartline-typography.css",
+    "tools/verify-font-policy.mjs",
+    "tests/proofreading-ui-contract.test.js",
+    "APPLY_3_5_2.md",
+    "README_v352.txt",
+    "QA_PROOFREADING_3_5_2.md",
+    "VALIDATION_3_5_2.txt"
+  ],
+  "delete": []
+}
