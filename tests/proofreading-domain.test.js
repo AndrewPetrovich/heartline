@@ -1,30 +1,45 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createDefaultProofreadingState, deriveUnitState, markUnitPass, createTextAnchor, resolveTextAnchor,
-  runDeterministicChecks, validateRegexPattern, findTextMatches, replaceTextMatches,
-  aggregateStatuses, reviewFingerprint
+  createDefaultProofreadingState, normalizeProofreadingState, deriveUnitState, markUnitReviewed,
+  createTextAnchor, resolveTextAnchor, runDeterministicChecks, validateRegexPattern,
+  findTextMatches, replaceTextMatches, aggregateStatuses, reviewFingerprint, analyzeNovelStyle
 } from '../hl-editor/proofreading/domain/proofreading.js';
 
-test('proofreading has five review passes by default', () => {
+test('proofreading uses one continuous review state without passes', () => {
   const state = createDefaultProofreadingState('2026-08-15T00:00:00Z');
-  assert.deepEqual(state.passes.map(pass => pass.id), ['read', 'proof', 'style', 'continuity', 'final']);
-  assert.equal(state.activePassId, 'read');
+  assert.equal(state.formatVersion, 2);
+  assert.equal('passes' in state, false);
+  assert.deepEqual(state.units, {});
+});
+
+test('legacy pass-based proofreading state migrates to latest reviewed record', () => {
+  const state = normalizeProofreadingState({
+    formatVersion: 1,
+    activePassId: 'style',
+    passes: [{ id: 'read' }, { id: 'style' }],
+    units: { f1: { passes: {
+      read: { status: 'reviewed', reviewedHash: 'old', reviewedAt: '2026-08-14T00:00:00Z' },
+      style: { status: 'reviewed', reviewedHash: 'new', reviewedAt: '2026-08-15T00:00:00Z' }
+    } } }
+  });
+  assert.equal(state.units.f1.reviewedHash, 'new');
+  assert.equal('passes' in state.units.f1, false);
 });
 
 test('granular review hash invalidates only the changed fragment', () => {
   let state = createDefaultProofreadingState('2026-08-15T00:00:00Z');
-  state = markUnitPass(state, 'fr:a', 'proof', 'Текст A', '2026-08-15T00:01:00Z');
-  state = markUnitPass(state, 'fr:b', 'proof', 'Текст B', '2026-08-15T00:01:00Z');
-  assert.equal(deriveUnitState({ state, fragmentId: 'fr:a', passId: 'proof', currentText: 'Текст A', reviews: [] }).status, 'reviewed');
-  assert.equal(deriveUnitState({ state, fragmentId: 'fr:b', passId: 'proof', currentText: 'Текст B!', reviews: [] }).status, 'changed');
-  assert.equal(deriveUnitState({ state, fragmentId: 'fr:a', passId: 'proof', currentText: 'Текст A', reviews: [] }).status, 'reviewed');
+  state = markUnitReviewed(state, 'fr:a', 'Текст A', '2026-08-15T00:01:00Z');
+  state = markUnitReviewed(state, 'fr:b', 'Текст B', '2026-08-15T00:01:00Z');
+  assert.equal(deriveUnitState({ state, fragmentId: 'fr:a', currentText: 'Текст A', reviews: [] }).status, 'reviewed');
+  assert.equal(deriveUnitState({ state, fragmentId: 'fr:b', currentText: 'Текст B!', reviews: [] }).status, 'changed');
+  assert.equal(deriveUnitState({ state, fragmentId: 'fr:a', currentText: 'Текст A', reviews: [] }).status, 'reviewed');
 });
 
 test('open text review takes precedence over reviewed status', () => {
   let state = createDefaultProofreadingState('2026-08-15T00:00:00Z');
-  state = markUnitPass(state, 'fr:a', 'read', 'Текст', '2026-08-15T00:01:00Z');
-  const derived = deriveUnitState({ state, fragmentId: 'fr:a', passId: 'read', currentText: 'Текст', reviews: [{ fragmentId: 'fr:a', targetType: 'text', status: 'Открыто' }] });
+  state = markUnitReviewed(state, 'fr:a', 'Текст', '2026-08-15T00:01:00Z');
+  const derived = deriveUnitState({ state, fragmentId: 'fr:a', currentText: 'Текст', reviews: [{ fragmentId: 'fr:a', targetType: 'text', status: 'Открыто' }] });
   assert.equal(derived.status, 'attention');
 });
 
@@ -69,6 +84,18 @@ test('aggregate status exposes changed and attention before completion', () => {
   assert.equal(aggregateStatuses([{ status: 'reviewed' }, { status: 'changed' }]).status, 'changed');
   assert.equal(aggregateStatuses([{ status: 'reviewed' }, { status: 'attention' }]).status, 'attention');
   assert.equal(aggregateStatuses([{ status: 'reviewed' }, { status: 'reviewed' }]).percent, 100);
+});
+
+test('style analysis reports editorial readiness without claiming artistic quality', () => {
+  const state = createDefaultProofreadingState();
+  const units = [
+    { type: 'narration', text: 'Короткая фраза. Ещё одна фраза.', status: 'reviewed', reviews: [] },
+    { type: 'dialogue', text: 'Я согласен. Пойдём дальше.', status: 'reviewed', reviews: [] }
+  ];
+  const report = analyzeNovelStyle(units, state);
+  assert.equal(report.reviewedPercent, 100);
+  assert.ok(report.readinessScore >= 0 && report.readinessScore <= 100);
+  assert.match(report.disclaimer, /не художественную ценность/i);
 });
 
 test('review fingerprint changes with text', () => {

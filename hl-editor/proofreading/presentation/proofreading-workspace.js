@@ -5,8 +5,10 @@ import { TEXT_REVIEW_CATEGORIES, workflowStatusFromLegacy } from '../domain/proo
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 const repository = new BrowserProofreadingRepository();
+const READER_PREFS_KEY = 'heartline-reader-prefs-v1';
 let service = null;
 let active = false;
+let redirectingLegacyReader = false;
 let model = null;
 let selectedFragmentId = null;
 let rightTab = 'reviews';
@@ -15,6 +17,16 @@ let editorSaving = false;
 let lastEditorSavedValue = null;
 let currentFindings = [];
 let searchPreview = null;
+let styleReport = null;
+let toastTimer = null;
+
+function loadReaderPrefs() {
+  const defaults = { context: 'auto', textScale: 1, lineHeight: 1.58, font: 'serif', columnWidth: 790, focus: false };
+  try { return { ...defaults, ...JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{}') }; }
+  catch (_) { return defaults; }
+}
+let readerPrefs = loadReaderPrefs();
+function persistReaderPrefs() { localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); }
 
 function getService() {
   if (service) return service;
@@ -38,8 +50,8 @@ function installStyles() {
 
 function statusLabel(status) {
   return ({
-    'not-started': 'Не начато', 'in-progress': 'В работе', attention: 'Есть замечания',
-    reviewed: 'Проверено', approved: 'Утверждено', changed: 'Изменено после проверки'
+    'not-started': 'Не вычитано', 'in-progress': 'В работе', attention: 'Есть замечания',
+    reviewed: 'Вычитано', approved: 'Утверждено', changed: 'Изменено после вычитки'
   })[status] || status;
 }
 
@@ -55,6 +67,21 @@ function categoryForFinding(code) {
   return 'Другое';
 }
 
+function proofToast(message, kind = 'info') {
+  let node = $('hlProofToast');
+  if (!node) {
+    node = document.createElement('div');
+    node.id = 'hlProofToast';
+    node.className = 'hl-proof-toast';
+    document.body.appendChild(node);
+  }
+  clearTimeout(toastTimer);
+  node.dataset.kind = kind;
+  node.textContent = message;
+  node.classList.add('visible');
+  toastTimer = setTimeout(() => node.classList.remove('visible'), 3200);
+}
+
 function currentUnit() { return model?.units?.find(unit => unit.fragmentId === selectedFragmentId) || null; }
 function currentScene() { const unit = currentUnit(); return unit ? model.scenes.find(scene => scene.sceneId === unit.sceneId) : null; }
 function currentChapter() { const unit = currentUnit(); return unit ? model.chapters.find(chapter => chapter.chapterId === unit.chapterId) : null; }
@@ -62,15 +89,17 @@ function currentChapter() { const unit = currentUnit(); return unit ? model.chap
 async function reloadModel({ keepSelection = true, render = true } = {}) {
   if (!model?.project?.projectId) return;
   const previous = keepSelection ? selectedFragmentId : null;
-  model = await getService().load(model.project.projectId, model.state?.activePassId);
+  model = await getService().load(model.project.projectId);
   if (previous && model.units.some(unit => unit.fragmentId === previous)) selectedFragmentId = previous;
   else selectedFragmentId = model.workspace.selectedFragmentId || getService().nextPending(model, null, 1)?.fragmentId || model.units[0]?.fragmentId || null;
   if (render) renderWorkspace();
 }
 
 async function openProofreading() {
+  if (active && document.querySelector('.hl-proofreading-shell')) return;
   active = true;
   document.body.classList.add('hl-proofreading-active');
+  document.body.classList.remove('reader-active');
   document.querySelectorAll('[data-route]').forEach(button => button.classList.remove('active'));
   document.querySelectorAll('.hl-proof-nav').forEach(button => button.classList.add('active'));
   const projectId = await getService().getActiveProjectId();
@@ -100,47 +129,63 @@ function leaveProofreading() {
   document.querySelectorAll('.hl-proof-nav').forEach(button => button.classList.remove('active'));
 }
 
+function makeProofNav(id) {
+  const button = document.createElement('button');
+  button.id = id;
+  button.className = 'nav-button hl-proof-nav';
+  button.type = 'button';
+  button.textContent = 'Вычитка';
+  button.onclick = openProofreading;
+  return button;
+}
+
 function installNavigation() {
   const desktop = $('mainNav');
+  const desktopReader = desktop?.querySelector('[data-route="reader"]');
+  if (desktopReader) { desktopReader.hidden = true; desktopReader.style.display = 'none'; }
   if (desktop && !$('hlProofreadingNav')) {
-    const button = document.createElement('button');
-    button.id = 'hlProofreadingNav';
-    button.className = 'nav-button hl-proof-nav';
-    button.type = 'button';
-    button.textContent = 'Вычитка';
-    const reader = desktop.querySelector('[data-route="reader"]');
-    reader?.after(button);
-    button.onclick = openProofreading;
+    const button = makeProofNav('hlProofreadingNav');
+    desktop.insertBefore(button, desktopReader || desktop.children[1] || null);
   }
+
   const mobile = document.querySelector('.mobile-nav');
+  const mobileReader = mobile?.querySelector('[data-route="reader"]');
+  if (mobileReader) { mobileReader.hidden = true; mobileReader.style.display = 'none'; }
+  const storyboard = mobile?.querySelector('[data-route="storyboard"]');
+  if (storyboard) storyboard.style.display = '';
   if (mobile && !$('hlProofreadingMobileNav')) {
-    const button = document.createElement('button');
-    button.id = 'hlProofreadingMobileNav';
-    button.className = 'nav-button hl-proof-nav';
-    button.type = 'button';
-    button.textContent = 'Вычитка';
-    mobile.querySelector('[data-route="reader"]')?.after(button);
-    button.onclick = openProofreading;
-    const storyboard = mobile.querySelector('[data-route="storyboard"]');
-    if (storyboard) storyboard.style.display = 'none';
+    const button = makeProofNav('hlProofreadingMobileNav');
+    mobile.insertBefore(button, mobileReader || mobile.children[1] || null);
   }
+
   document.querySelectorAll('[data-route],#brandButton').forEach(button => {
     if (button.dataset.hlProofLeaveBound) return;
     button.dataset.hlProofLeaveBound = '1';
-    button.addEventListener('click', leaveProofreading, true);
+    button.addEventListener('click', () => {
+      if (!button.classList.contains('hl-proof-nav')) leaveProofreading();
+    }, true);
   });
 }
 
+function redirectLegacyReaderIfNeeded() {
+  if (active || redirectingLegacyReader || !document.getElementById('readerShell')) return;
+  redirectingLegacyReader = true;
+  setTimeout(async () => {
+    try { await openProofreading(); }
+    finally { redirectingLegacyReader = false; }
+  }, 0);
+}
+
 function progressHtml(progress) {
-  return `<div class="hl-proof-progress"><div class="hl-proof-progress-bar"><i style="width:${progress.percent}%"></i></div><small>${progress.percent}%</small></div>`;
+  return `<div class="hl-proof-progress"><div class="hl-proof-progress-bar"><i style="width:${progress.percent}%"></i></div><small>${progress.percent}% вычитано</small></div>`;
 }
 
 function outlineHtml() {
   const route = model.routeCoverage?.total
-    ? `<div class="hl-proof-route-coverage"><h3>Проверочные маршруты · ${model.routeCoverage.completed}/${model.routeCoverage.total}</h3>${model.routeCoverage.routes.map(item => `<div class="hl-proof-route"><span>${esc(item.title)}</span><b>${item.percent}%</b></div>`).join('')}</div>`
+    ? `<div class="hl-proof-route-coverage"><h3>Покрытие веток · ${model.routeCoverage.completed}/${model.routeCoverage.total}</h3>${model.routeCoverage.routes.map(item => `<div class="hl-proof-route"><span>${esc(item.title)}</span><b>${item.percent}%</b></div>`).join('')}</div>`
     : '';
   return `<div class="hl-proof-book-summary">
-    <div class="hl-proof-metric"><strong>${model.progress.percent}%</strong><span>проход</span></div>
+    <div class="hl-proof-metric"><strong>${model.progress.percent}%</strong><span>вычитано</span></div>
     <div class="hl-proof-metric"><strong>${model.progress.counts.attention}</strong><span>с замечаниями</span></div>
     <div class="hl-proof-metric"><strong>${model.progress.counts.changed}</strong><span>изменено</span></div>
   </div>${model.chapters.map(chapter => `<details class="hl-proof-chapter" ${chapter.units.some(unit => unit.fragmentId === selectedFragmentId) ? 'open' : ''}>
@@ -151,23 +196,42 @@ function outlineHtml() {
     </div>`).join('')}</details>`).join('')}${route}`;
 }
 
-function contextText(unit, offset) {
-  if (!unit) return '';
+function contextLimit() {
+  if (readerPrefs.context === 'auto') return window.matchMedia?.('(max-width:720px)').matches ? 1 : 2;
+  return Math.max(0, Number(readerPrefs.context) || 0);
+}
+
+function contextUnits(unit, direction) {
+  if (!unit) return [];
   const index = model.units.findIndex(item => item.fragmentId === unit.fragmentId);
-  const candidate = model.units[index + offset];
-  if (!candidate || candidate.sceneId !== unit.sceneId) return '';
-  return `${candidate.speaker ? `${candidate.speaker}: ` : ''}${candidate.text}`;
+  const result = [];
+  const limit = direction < 0 ? contextLimit() : Math.min(1, contextLimit());
+  for (let step = 1; step <= limit; step++) {
+    const candidate = model.units[index + direction * step];
+    if (!candidate || candidate.sceneId !== unit.sceneId) break;
+    if (direction < 0) result.unshift(candidate); else result.push(candidate);
+  }
+  return result;
+}
+
+function contextHtml(unit, direction) {
+  return contextUnits(unit, direction).map(candidate => `<div class="hl-proof-context${direction > 0 ? ' next' : ''}">${candidate.speaker ? `<strong>${esc(candidate.speaker)}</strong> ` : ''}${esc(candidate.text)}</div>`).join('');
+}
+
+function choiceOptionsHtml(unit) {
+  if (!unit?.options?.length) return '';
+  return `<div class="hl-proof-choice-options"><span>Варианты выбора</span>${unit.options.map(option => `<div>${esc(option.label)}</div>`).join('')}</div>`;
 }
 
 function editorHtml() {
   const unit = currentUnit();
   if (!unit) return '<div class="hl-proof-empty">Нет текстовых фрагментов.</div>';
   return `<article class="hl-proof-editor-card">
-    ${contextText(unit, -1) ? `<div class="hl-proof-context">${esc(contextText(unit, -1))}</div>` : ''}
-    <header class="hl-proof-editor-head"><div><span class="kicker">${esc(model.activePass?.label || 'Вычитка')}</span><h2>${esc(`${unit.chapterTitle} · ${unit.sceneTitle}`)}</h2><p>${esc(`${unit.type}${unit.speaker ? ` · ${unit.speaker}` : ''} · ${unit.fragmentId}`)}</p></div><span id="hlProofStatus" class="hl-proof-status-pill" data-status="${esc(unit.status)}">${esc(statusLabel(unit.status))}</span></header>
-    <div class="hl-proof-editor-wrap"><textarea id="hlProofEditor" class="hl-proof-editor" spellcheck="true">${esc(unit.text)}</textarea><div class="hl-proof-highlight-note">Выделите текст и нажмите «Замечание», чтобы сохранить устойчивую привязку с offsets и контекстом.</div></div>
-    <div class="hl-proof-editor-actions"><button id="hlProofReview" class="button secondary small">Замечание</button><button id="hlProofRunChecks" class="button secondary small">Проверить</button><button id="hlProofMark" class="button primary small">✓ Проверено</button>${model.state.activePassId === 'final' ? '<button id="hlProofApprove" class="button secondary small">Утвердить</button>' : ''}<span id="hlProofSaveState" class="hl-proof-save-state">${esc(model.workspace.saveState || 'saved')}</span></div>
-    ${contextText(unit, 1) ? `<div class="hl-proof-context next">${esc(contextText(unit, 1))}</div>` : ''}
+    ${contextHtml(unit, -1)}
+    <header class="hl-proof-editor-head"><div><span class="kicker">ВЫЧИТКА</span><h2>${esc(`${unit.chapterTitle} · ${unit.sceneTitle}`)}</h2><p>${esc(`${unit.type}${unit.speaker ? ` · ${unit.speaker}` : ''} · ${unit.fragmentId}`)}</p></div><span id="hlProofStatus" class="hl-proof-status-pill" data-status="${esc(unit.status)}">${esc(statusLabel(unit.status))}</span></header>
+    <div class="hl-proof-editor-wrap"><textarea id="hlProofEditor" class="hl-proof-editor" spellcheck="true">${esc(unit.text)}</textarea><div class="hl-proof-highlight-note">Выделите текст и нажмите «Замечание». Кнопка «Вперёд» автоматически отмечает текущий фрагмент вычитанным, если у него нет открытых замечаний.</div>${choiceOptionsHtml(unit)}</div>
+    <div class="hl-proof-editor-actions"><button id="hlProofReview" class="button secondary small">Замечание</button><button id="hlProofRunChecks" class="button secondary small">Проверить текст</button><span id="hlProofSaveState" class="hl-proof-save-state">${esc(model.workspace.saveState || 'saved')}</span></div>
+    ${contextHtml(unit, 1)}
   </article>`;
 }
 
@@ -182,29 +246,62 @@ function reviewsHtml() {
       <label>Комментарий<textarea id="hlProofReviewComment" placeholder="Что исправить и почему?"></textarea></label>
       <div class="hl-proof-inline"><button id="hlProofReviewCancel" class="hl-proof-small-button">Отмена</button><button id="hlProofReviewSave" class="hl-proof-small-button primary">Сохранить</button></div>
     </div>
-    ${reviews.length ? reviews.map(review => `<article class="hl-proof-review-card" data-review-id="${esc(review.reviewId)}"><header><strong>${esc(review.category || 'Другое')}</strong><select class="select" data-proof-review-status="${esc(review.reviewId)}">${model.reviewWorkflowStates.map(status => `<option value="${status}" ${status === review.workflowStatus ? 'selected' : ''}>${esc(workflowLabel(status))}</option>`).join('')}</select></header>${review.quotedText ? `<blockquote class="hl-proof-quote" data-proof-anchor="${esc(review.reviewId)}">${esc(review.quotedText)}</blockquote>` : ''}${review.resolvedAnchor && ['stale','ambiguous'].includes(review.resolvedAnchor.status) ? `<div class="hl-proof-anchor-stale">Привязка к тексту устарела: ${esc(review.resolvedAnchor.status)}</div>` : ''}<p>${esc(review.comment)}</p>${review.automation?.source ? `<small>Источник предложения: ${esc(review.automation.source)}</small>` : ''}</article>`).join('') : '<div class="hl-proof-empty">Открытых и закрытых текстовых замечаний для этого фрагмента нет.</div>'}`;
+    ${reviews.length ? reviews.map(review => `<article class="hl-proof-review-card" data-review-id="${esc(review.reviewId)}"><header><strong>${esc(review.category || 'Другое')}</strong><select class="select" data-proof-review-status="${esc(review.reviewId)}">${model.reviewWorkflowStates.map(status => `<option value="${status}" ${status === review.workflowStatus ? 'selected' : ''}>${esc(workflowLabel(status))}</option>`).join('')}</select></header>${review.quotedText ? `<blockquote class="hl-proof-quote" data-proof-anchor="${esc(review.reviewId)}">${esc(review.quotedText)}</blockquote>` : ''}${review.resolvedAnchor && ['stale','ambiguous'].includes(review.resolvedAnchor.status) ? `<div class="hl-proof-anchor-stale">Привязка к тексту устарела: ${esc(review.resolvedAnchor.status)}</div>` : ''}<p>${esc(review.comment)}</p>${review.automation?.source ? `<small>Источник предложения: ${esc(review.automation.source)}</small>` : ''}</article>`).join('') : '<div class="hl-proof-empty">Замечаний для этого фрагмента нет.</div>'}`;
 }
 
-function findingsHtml() {
-  return `<div class="hl-proof-section-title"><h3>Локальные проверки</h3><button id="hlProofRefreshFindings" class="hl-proof-small-button">Запустить</button></div>${currentFindings.length ? currentFindings.map((finding, index) => `<article class="hl-proof-finding" data-severity="${esc(finding.severity)}"><header><strong>${esc(finding.message)}</strong><span class="hl-proof-finding-code">${esc(finding.code)}</span></header><p>Позиция ${finding.startOffset}–${finding.endOffset}</p><div class="hl-proof-inline">${finding.replacement != null ? `<button class="hl-proof-small-button primary" data-finding-fix="${index}">Исправить</button>` : ''}<button class="hl-proof-small-button" data-finding-review="${index}">В замечание</button><button class="hl-proof-small-button" data-finding-ignore="${index}">Игнорировать</button></div></article>`).join('') : '<div class="hl-proof-empty">Нажмите «Запустить». Проверки локальные и детерминированные; они не отправляют текст наружу.</div>'}`;
+function findingsListHtml() {
+  return currentFindings.length ? currentFindings.map((finding, index) => `<article class="hl-proof-finding" data-severity="${esc(finding.severity)}"><header><strong>${esc(finding.message)}</strong><span class="hl-proof-finding-code">${esc(finding.code)}</span></header><p>Позиция ${finding.startOffset}–${finding.endOffset}</p><div class="hl-proof-inline">${finding.replacement != null ? `<button class="hl-proof-small-button primary" data-finding-fix="${index}">Исправить</button>` : ''}<button class="hl-proof-small-button" data-finding-review="${index}">В замечание</button><button class="hl-proof-small-button" data-finding-ignore="${index}">Игнорировать</button></div></article>`).join('') : '<div class="hl-proof-empty compact">Нажмите «Проверить текст» для локальной проверки текущего фрагмента.</div>';
+}
+
+function qualityReportHtml() {
+  if (!styleReport) return '<div class="hl-proof-empty compact">Запустите анализ, чтобы увидеть стилевой профиль и редакционную готовность книги.</div>';
+  return `<div class="hl-proof-quality-score"><strong>${styleReport.readinessScore}</strong><div><b>Редакционная готовность: ${esc(styleReport.readinessLabel)}</b><small>${esc(styleReport.disclaimer)}</small></div></div>
+    <div class="hl-proof-quality-grid"><div><b>${styleReport.words.toLocaleString('ru-RU')}</b><span>слов</span></div><div><b>${styleReport.avgSentenceWords}</b><span>слов / предложение</span></div><div><b>${styleReport.dialoguePercent}%</b><span>диалог</span></div><div><b>${styleReport.uniqueWordPercent}%</b><span>лексич. разнообразие</span></div><div><b>${styleReport.findingRate}</b><span>сигналов / 1000 слов</span></div><div><b>${styleReport.reviewedPercent}%</b><span>вычитано</span></div></div>
+    <div class="hl-proof-style-signals">${styleReport.signals.map(signal => `<p>• ${esc(signal)}</p>`).join('')}</div>
+    <div class="hl-proof-frequency"><b>Частые содержательные слова</b><div>${styleReport.frequentWords.map(item => `<span>${esc(item.word)} · ${item.count}</span>`).join('') || '<span>Недостаточно текста</span>'}</div></div>`;
+}
+
+function qualityHtml() {
+  return `<div class="hl-proof-section-title"><h3>Стиль и качество</h3><button id="hlProofAnalyzeStyle" class="hl-proof-small-button primary">Анализировать книгу</button></div>
+    <p class="hl-proof-help">HEARTLINE показывает редакционные сигналы, ритм, повторяемость и готовность текста. Это не автоматическая оценка художественной ценности.</p>
+    ${qualityReportHtml()}
+    <div class="hl-proof-section-title"><h3>Редакторская установка стиля</h3></div><div class="hl-proof-form"><label>Как должен звучать текст<textarea id="hlProofStyleGuide" placeholder="Например: короткие энергичные фразы, сдержанная ирония, минимум канцеляризмов…">${esc(model.state.styleGuide?.notes || '')}</textarea></label><button id="hlProofSaveStyleGuide" class="hl-proof-small-button">Сохранить установку</button></div>
+    <div class="hl-proof-section-title quality-findings"><h3>Текущий фрагмент</h3><button id="hlProofRefreshFindings" class="hl-proof-small-button">Проверить</button></div>${findingsListHtml()}`;
 }
 
 function dictionaryHtml() {
   const dictionary = model.state.dictionary;
   return `<div class="hl-proof-section-title"><h3>Словарь проекта</h3></div><div class="hl-proof-form"><label>Правильное написание<input id="hlProofTermCanonical" placeholder="Например: Лиарен"></label><label>Варианты/ошибки<textarea id="hlProofTermVariants" placeholder="Лиарэн, Лиарин"></textarea></label><label>Комментарий<input id="hlProofTermNote" placeholder="Имя персонажа"></label><button id="hlProofAddTerm" class="hl-proof-small-button primary">Добавить термин</button></div>
-    <div style="margin-top:10px">${dictionary.terms.map(term => `<article class="hl-proof-term"><strong>${esc(term.canonical)}</strong><p>${esc(term.variants.join(', ') || 'без вариантов')}${term.note ? `<br>${esc(term.note)}` : ''}</p><button class="hl-proof-small-button" data-remove-term="${esc(term.id)}">Удалить</button></article>`).join('') || '<div class="hl-proof-empty">Терминов пока нет.</div>'}</div>
-    <div class="hl-proof-form" style="margin-top:12px"><label>Нежелательные слова/формы<textarea id="hlProofForbidden">${esc(dictionary.forbiddenWords.join('\n'))}</textarea></label><button id="hlProofSaveForbidden" class="hl-proof-small-button">Сохранить список</button></div>
-    <div class="hl-proof-section-title" style="margin-top:14px"><h3>Проходы вычитки</h3></div><div class="hl-proof-pass-list">${model.state.passes.map(pass => `<label class="hl-proof-pass-toggle"><input type="checkbox" data-proof-pass-toggle="${esc(pass.id)}" ${pass.enabled ? 'checked' : ''}><span><b>${esc(pass.label)}</b><small>${esc(pass.description)}</small></span></label>`).join('')}</div>`;
+    <div style="margin-top:10px">${dictionary.terms.map(term => `<article class="hl-proof-term"><strong>${esc(term.canonical)}</strong><p>${esc(term.variants.join(', ') || 'без вариантов')}${term.note ? `<br>${esc(term.note)}` : ''}</p><button class="hl-proof-small-button" data-remove-term="${esc(term.id)}">Удалить</button></article>`).join('') || '<div class="hl-proof-empty compact">Терминов пока нет.</div>'}</div>
+    <div class="hl-proof-form" style="margin-top:12px"><label>Нежелательные слова/формы<textarea id="hlProofForbidden">${esc(dictionary.forbiddenWords.join('\n'))}</textarea></label><button id="hlProofSaveForbidden" class="hl-proof-small-button">Сохранить список</button></div>`;
 }
 
-function rightBodyHtml() { return rightTab === 'checks' ? findingsHtml() : rightTab === 'dictionary' ? dictionaryHtml() : reviewsHtml(); }
+function rightBodyHtml() { return rightTab === 'quality' ? qualityHtml() : rightTab === 'dictionary' ? dictionaryHtml() : reviewsHtml(); }
+
+function readerNavHtml() {
+  const index = model.units.findIndex(item => item.fragmentId === selectedFragmentId);
+  const firstDisabled = index <= 0 ? 'disabled' : '';
+  const lastDisabled = index < 0 || index >= model.units.length - 1 ? 'disabled' : '';
+  return `<footer class="hl-proof-reader-nav"><button id="hlProofFirst" class="button secondary" ${firstDisabled}>Первая</button><button id="hlProofBack" class="button secondary" ${firstDisabled}>← Назад</button><button id="hlProofForward" class="button primary">Вперёд →</button><button id="hlProofLast" class="button secondary" ${lastDisabled}>Последняя</button><span>${index >= 0 ? index + 1 : 0} / ${model.units.length}</span></footer>`;
+}
 
 function renderWorkspace() {
   const view = $('view');
   const unit = currentUnit();
   view.className = 'view';
-  view.innerHTML = `<section class="hl-proofreading-shell"><header class="hl-proof-toolbar"><div class="hl-proof-title"><strong>Вычитка · ${esc(model.project.title)}</strong><span>${esc(model.activePass?.description || '')}</span></div><select id="hlProofPass" class="select">${model.state.passes.filter(pass => pass.enabled).map(pass => `<option value="${esc(pass.id)}" ${pass.id === model.state.activePassId ? 'selected' : ''}>${esc(pass.label)}</option>`).join('')}</select>${progressHtml(model.progress)}<button id="hlProofPrev" class="button secondary small">←</button><button id="hlProofNext" class="button primary small">Следующее непроверенное →</button><button id="hlProofSearch" class="button secondary small">Поиск / замена</button><button id="hlProofSceneDone" class="button secondary small">Сцена ✓</button><button id="hlProofChapterDone" class="button secondary small">Глава ✓</button>${model.state.activePassId === 'final' ? '<button id="hlProofBookDone" class="button secondary small">Книга ✓</button>' : ''}<button id="hlProofRightToggle" class="button secondary small hl-proof-right-toggle">Панель</button></header><div class="hl-proof-grid"><aside class="hl-proof-pane hl-proof-outline">${outlineHtml()}</aside><main class="hl-proof-pane hl-proof-center">${editorHtml()}</main><aside id="hlProofRight" class="hl-proof-pane hl-proof-right"><div class="hl-proof-right-tabs"><button data-proof-tab="reviews" class="${rightTab === 'reviews' ? 'active' : ''}">Замечания</button><button data-proof-tab="checks" class="${rightTab === 'checks' ? 'active' : ''}">Проверки</button><button data-proof-tab="dictionary" class="${rightTab === 'dictionary' ? 'active' : ''}">Словарь</button></div><div id="hlProofRightBody" class="hl-proof-right-body">${rightBodyHtml()}</div></aside></div></section>`;
+  view.innerHTML = `<section class="hl-proofreading-shell ${readerPrefs.focus ? 'hl-proof-focus' : ''}"><header class="hl-proof-toolbar"><div class="hl-proof-title"><strong>Вычитка · ${esc(model.project.title)}</strong><span>Чтение, редактура и оценка стиля в одном рабочем режиме</span></div>${progressHtml(model.progress)}<button id="hlProofPending" class="button secondary small">К непроверенному</button><button id="hlProofSearch" class="button secondary small">Поиск / замена</button><button id="hlProofQuality" class="button secondary small">Стиль и качество</button><button id="hlProofView" class="button secondary small">Вид</button><button id="hlProofRightToggle" class="button secondary small hl-proof-right-toggle">Панель</button></header><div class="hl-proof-grid"><aside class="hl-proof-pane hl-proof-outline">${outlineHtml()}</aside><main class="hl-proof-pane hl-proof-center">${editorHtml()}</main><aside id="hlProofRight" class="hl-proof-pane hl-proof-right"><div class="hl-proof-right-tabs"><button data-proof-tab="reviews" class="${rightTab === 'reviews' ? 'active' : ''}">Замечания</button><button data-proof-tab="quality" class="${rightTab === 'quality' ? 'active' : ''}">Качество</button><button data-proof-tab="dictionary" class="${rightTab === 'dictionary' ? 'active' : ''}">Словарь</button></div><div id="hlProofRightBody" class="hl-proof-right-body">${rightBodyHtml()}</div></aside></div>${readerNavHtml()}</section>`;
+  applyReaderPreferences();
   wireWorkspace(unit);
+}
+
+function applyReaderPreferences() {
+  const shell = document.querySelector('.hl-proofreading-shell');
+  if (!shell) return;
+  shell.style.setProperty('--hl-proof-text-scale', String(readerPrefs.textScale));
+  shell.style.setProperty('--hl-proof-line-height', String(readerPrefs.lineHeight));
+  shell.style.setProperty('--hl-proof-column-width', `${Number(readerPrefs.columnWidth) || 790}px`);
+  shell.classList.toggle('hl-proof-font-sans', readerPrefs.font === 'sans');
+  shell.classList.toggle('hl-proof-focus', Boolean(readerPrefs.focus));
 }
 
 async function saveEditorNow({ flushSource = false } = {}) {
@@ -214,7 +311,10 @@ async function saveEditorNow({ flushSource = false } = {}) {
   if (!editor || !unit || editorSaving) return;
   const value = editor.value;
   if (lastEditorSavedValue === null) lastEditorSavedValue = unit.text;
-  if (value === lastEditorSavedValue) return;
+  if (value === lastEditorSavedValue) {
+    if (flushSource && window.HEARTLINEProjectCore?.flushSourceSave && model.workspace.dirty) await window.HEARTLINEProjectCore.flushSourceSave(model.project.projectId, 'autosave');
+    return;
+  }
   editorSaving = true;
   const stateNode = $('hlProofSaveState');
   if (stateNode) stateNode.textContent = 'saving';
@@ -232,8 +332,8 @@ async function saveEditorNow({ flushSource = false } = {}) {
   } finally { editorSaving = false; }
 }
 
-async function selectUnit(fragmentId) {
-  await saveEditorNow();
+async function selectUnit(fragmentId, { skipSave = false } = {}) {
+  if (!skipSave) await saveEditorNow();
   const unit = model.units.find(item => item.fragmentId === fragmentId);
   if (!unit) return;
   selectedFragmentId = fragmentId;
@@ -243,43 +343,64 @@ async function selectUnit(fragmentId) {
   await reloadModel({ keepSelection: true, render: true });
 }
 
+async function goSequential(direction) {
+  await saveEditorNow();
+  const index = model.units.findIndex(item => item.fragmentId === selectedFragmentId);
+  const target = model.units[index + direction];
+  if (target) await selectUnit(target.fragmentId, { skipSave: true });
+}
+
+async function goBoundary(last = false) {
+  await saveEditorNow();
+  const target = last ? model.units.at(-1) : model.units[0];
+  if (target) await selectUnit(target.fragmentId, { skipSave: true });
+}
+
+async function goForwardAndReview() {
+  const index = model.units.findIndex(item => item.fragmentId === selectedFragmentId);
+  if (index < 0) return;
+  const isLast = index === model.units.length - 1;
+  await saveEditorNow({ flushSource: isLast });
+  await reloadModel({ keepSelection: true, render: false });
+  let reviewed = true;
+  try { await getService().markUnit(model.project.projectId, selectedFragmentId); }
+  catch (error) {
+    reviewed = false;
+    proofToast('Фрагмент оставлен с замечанием и не отмечен вычитанным.', 'attention');
+  }
+  await reloadModel({ keepSelection: true, render: false });
+  if (!isLast) {
+    const target = model.units[index + 1];
+    if (target) await selectUnit(target.fragmentId, { skipSave: true });
+  } else {
+    renderWorkspace();
+    if (reviewed) proofToast('Последний фрагмент вычитан. Книга пройдена до конца.', 'success');
+  }
+}
+
 function wireWorkspace(unit) {
   lastEditorSavedValue = unit?.text ?? null;
-  $('hlProofPass')?.addEventListener('change', async event => { await saveEditorNow(); await getService().selectPass(model.project.projectId, event.target.value); await reloadModel({ keepSelection: true }); });
   $('hlProofEditor')?.addEventListener('input', () => { clearTimeout(editorSaveTimer); $('hlProofSaveState').textContent = 'dirty'; editorSaveTimer = setTimeout(() => saveEditorNow(), 650); });
   $('hlProofEditor')?.addEventListener('keydown', event => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveEditorNow({ flushSource: true }); } });
   document.querySelectorAll('[data-proof-unit]').forEach(button => button.onclick = () => selectUnit(button.dataset.proofUnit));
   document.querySelectorAll('.hl-proof-scene-head').forEach(head => head.onclick = () => head.closest('.hl-proof-scene')?.classList.toggle('open'));
-  $('hlProofNext')?.addEventListener('click', async () => { await saveEditorNow(); await reloadModel({ keepSelection: true, render: false }); const next = getService().nextPending(model, selectedFragmentId, 1); if (next) selectUnit(next.fragmentId); });
-  $('hlProofPrev')?.addEventListener('click', async () => { await saveEditorNow(); const index = model.units.findIndex(item => item.fragmentId === selectedFragmentId); if (index > 0) selectUnit(model.units[index - 1].fragmentId); });
-  $('hlProofMark')?.addEventListener('click', () => markCurrent(false));
-  $('hlProofApprove')?.addEventListener('click', () => markCurrent(true));
-  $('hlProofSceneDone')?.addEventListener('click', () => markScope('scene'));
-  $('hlProofChapterDone')?.addEventListener('click', () => markScope('chapter'));
-  $('hlProofBookDone')?.addEventListener('click', () => markScope('book'));
+  $('hlProofFirst')?.addEventListener('click', () => goBoundary(false));
+  $('hlProofBack')?.addEventListener('click', () => goSequential(-1));
+  $('hlProofForward')?.addEventListener('click', goForwardAndReview);
+  $('hlProofLast')?.addEventListener('click', () => goBoundary(true));
+  $('hlProofPending')?.addEventListener('click', async () => { await saveEditorNow(); await reloadModel({ keepSelection: true, render: false }); const next = getService().nextPending(model, selectedFragmentId, 1); if (next) selectUnit(next.fragmentId, { skipSave: true }); else proofToast('Невычитанных фрагментов без завершённого статуса нет.', 'success'); });
   $('hlProofSearch')?.addEventListener('click', openSearchDialog);
+  $('hlProofQuality')?.addEventListener('click', async () => { rightTab = 'quality'; renderRight(); $('hlProofRight')?.classList.add('open'); });
+  $('hlProofView')?.addEventListener('click', openViewDialog);
   $('hlProofRightToggle')?.addEventListener('click', () => $('hlProofRight')?.classList.toggle('open'));
-  document.querySelectorAll('[data-proof-tab]').forEach(button => button.onclick = () => { rightTab = button.dataset.proofTab; currentFindings = rightTab === 'checks' ? currentFindings : currentFindings; renderRight(); });
+  document.querySelectorAll('[data-proof-tab]').forEach(button => button.onclick = () => { rightTab = button.dataset.proofTab; renderRight(); });
   wireRight();
 }
 
-async function markCurrent(approved) {
-  await saveEditorNow({ flushSource: true });
-  try { await getService().markUnit(model.project.projectId, selectedFragmentId, { approved }); await reloadModel({ keepSelection: true }); }
-  catch (error) { alert(error.message || error); rightTab = 'reviews'; renderRight(); }
-}
-
-async function markScope(scope) {
-  await saveEditorNow({ flushSource: true });
-  const unit = currentUnit();
-  if (!unit) return;
-  try {
-    let result;
-    if (scope === 'book') result = await getService().markProject(model.project.projectId, { approved: true });
-    else result = await getService().markScope(model.project.projectId, scope === 'scene' ? { sceneId: unit.sceneId } : { chapterId: unit.chapterId });
-    if (result.skipped?.length) alert(`Проверено: ${result.completed}. Пропущено из-за открытых замечаний: ${result.skipped.length}.`);
-    await reloadModel({ keepSelection: true });
-  } catch (error) { alert(error.message || error); }
+function proofreadingHotkeys(event) {
+  if (!active) return;
+  if (event.altKey && event.key === 'ArrowRight') { event.preventDefault(); goForwardAndReview(); }
+  else if (event.altKey && event.key === 'ArrowLeft') { event.preventDefault(); goSequential(-1); }
 }
 
 function renderRight() {
@@ -320,10 +441,11 @@ function wireRight() {
   document.querySelectorAll('[data-finding-fix]').forEach(button => button.onclick = () => applyFinding(Number(button.dataset.findingFix)));
   document.querySelectorAll('[data-finding-review]').forEach(button => button.onclick = () => findingToReview(Number(button.dataset.findingReview)));
   document.querySelectorAll('[data-finding-ignore]').forEach(button => button.onclick = async () => { const finding = currentFindings[Number(button.dataset.findingIgnore)]; if (!finding) return; await getService().ignoreFinding(model.project.projectId, finding.key); await runChecks(); });
+  $('hlProofAnalyzeStyle')?.addEventListener('click', analyzeStyle);
+  $('hlProofSaveStyleGuide')?.addEventListener('click', async () => { await getService().saveStyleGuide(model.project.projectId, $('hlProofStyleGuide').value); await reloadModel({ keepSelection: true, render: false }); renderRight(); proofToast('Редакторская установка стиля сохранена.', 'success'); });
   $('hlProofAddTerm')?.addEventListener('click', addTerm);
   document.querySelectorAll('[data-remove-term]').forEach(button => button.onclick = async () => { await getService().removeDictionaryTerm(model.project.projectId, button.dataset.removeTerm); await reloadModel({ keepSelection: true, render: false }); renderRight(); });
   $('hlProofSaveForbidden')?.addEventListener('click', async () => { await getService().setForbiddenWords(model.project.projectId, $('hlProofForbidden').value); await reloadModel({ keepSelection: true, render: false }); renderRight(); });
-  document.querySelectorAll('[data-proof-pass-toggle]').forEach(input => input.onchange = async () => { await getService().setPassEnabled(model.project.projectId, input.dataset.proofPassToggle, input.checked); await reloadModel({ keepSelection: true }); });
 }
 
 async function saveReviewForm() {
@@ -352,7 +474,15 @@ function focusReviewAnchor(reviewId) {
 async function runChecks() {
   await saveEditorNow();
   currentFindings = await getService().runChecks(model.project.projectId, selectedFragmentId);
-  rightTab = 'checks'; renderRight();
+  rightTab = 'quality'; renderRight(); $('hlProofRight')?.classList.add('open');
+}
+
+async function analyzeStyle() {
+  try {
+    await saveEditorNow();
+    styleReport = await getService().analyzeNovel(model.project.projectId);
+    rightTab = 'quality'; renderRight();
+  } catch (error) { alert(error.message || error); }
 }
 
 async function applyFinding(index) {
@@ -360,7 +490,7 @@ async function applyFinding(index) {
   await getService().applyFindingFix(model.project.projectId, selectedFragmentId, finding);
   await reloadModel({ keepSelection: true, render: false });
   currentFindings = await getService().runChecks(model.project.projectId, selectedFragmentId);
-  renderWorkspace(); rightTab = 'checks'; renderRight();
+  renderWorkspace(); rightTab = 'quality'; renderRight();
 }
 
 function findingToReview(index) {
@@ -381,13 +511,31 @@ function updateCurrentStatus() {
   if (open) { pill.dataset.status = 'attention'; pill.textContent = 'Есть замечания'; }
 }
 
+function openViewDialog() {
+  let dialog = $('hlProofViewDialog');
+  if (!dialog) { dialog = document.createElement('dialog'); dialog.id = 'hlProofViewDialog'; dialog.className = 'hl-proof-dialog hl-proof-view-dialog'; document.body.appendChild(dialog); }
+  dialog.innerHTML = `<header class="hl-proof-dialog-head"><h2>Вид чтения</h2><button id="hlProofViewClose" class="hl-proof-small-button">Закрыть</button></header><div class="hl-proof-dialog-body"><div class="hl-proof-form"><label>Контекст<select id="hlProofContext"><option value="0">Без предыдущих реплик</option><option value="1">1 предыдущая</option><option value="2">2 предыдущие</option><option value="auto">Авто</option></select></label><label>Размер текста<input id="hlProofTextScale" type="range" min="0.9" max="1.3" step="0.05" value="${readerPrefs.textScale}"></label><label>Интерлиньяж<input id="hlProofLineHeight" type="range" min="1.4" max="1.85" step="0.05" value="${readerPrefs.lineHeight}"></label><label>Шрифт<select id="hlProofFont"><option value="serif">Литературный serif</option><option value="sans">Нейтральный sans-serif</option></select></label><label>Ширина текста<select id="hlProofColumnWidth"><option value="680">Узкая</option><option value="790">Стандартная</option><option value="900">Широкая</option></select></label><label class="hl-proof-checkbox"><input id="hlProofFocus" type="checkbox" ${readerPrefs.focus ? 'checked' : ''}> Режим фокуса</label></div></div>`;
+  $('hlProofContext').value = String(readerPrefs.context);
+  $('hlProofFont').value = readerPrefs.font;
+  $('hlProofColumnWidth').value = String(readerPrefs.columnWidth);
+  $('hlProofViewClose').onclick = () => dialog.close();
+  const update = () => {
+    readerPrefs = { ...readerPrefs, context: $('hlProofContext').value === 'auto' ? 'auto' : Number($('hlProofContext').value), textScale: Number($('hlProofTextScale').value), lineHeight: Number($('hlProofLineHeight').value), font: $('hlProofFont').value, columnWidth: Number($('hlProofColumnWidth').value), focus: $('hlProofFocus').checked };
+    persistReaderPrefs();
+    renderWorkspace();
+  };
+  ['hlProofContext','hlProofFont','hlProofColumnWidth','hlProofFocus'].forEach(id => $(id).onchange = update);
+  ['hlProofTextScale','hlProofLineHeight'].forEach(id => $(id).oninput = update);
+  dialog.showModal();
+}
+
 async function openSearchDialog() {
   await saveEditorNow();
   await reloadModel({ keepSelection: true, render: false });
   let dialog = $('hlProofSearchDialog');
   if (!dialog) { dialog = document.createElement('dialog'); dialog.id = 'hlProofSearchDialog'; dialog.className = 'hl-proof-dialog'; document.body.appendChild(dialog); }
   const chapter = currentChapter();
-  dialog.innerHTML = `<header class="hl-proof-dialog-head"><h2>Поиск и безопасная замена</h2><button id="hlProofSearchClose" class="hl-proof-small-button">Закрыть</button></header><div class="hl-proof-dialog-body"><div class="hl-proof-form"><label>Найти<input id="hlProofSearchQuery"></label><label>Заменить<input id="hlProofSearchReplacement"></label><div class="hl-proof-inline"><label><input id="hlProofSearchRegex" type="checkbox"> Regex</label><label><input id="hlProofSearchCase" type="checkbox"> Учитывать регистр</label></div><label>Область<select id="hlProofSearchScope"><option value="all">Вся книга</option><option value="chapter">Текущая глава</option><option value="unreviewed">Только непроверенное</option><option value="changed">Изменённое после проверки</option></select></label><button id="hlProofSearchPreview" class="hl-proof-small-button primary">Предпросмотр</button></div><div id="hlProofSearchSummary"></div><div id="hlProofSearchResults" class="hl-proof-search-results"></div></div><footer class="hl-proof-dialog-foot"><button id="hlProofReplaceCommit" class="button primary" disabled>Применить показанные замены</button></footer>`;
+  dialog.innerHTML = `<header class="hl-proof-dialog-head"><h2>Поиск и безопасная замена</h2><button id="hlProofSearchClose" class="hl-proof-small-button">Закрыть</button></header><div class="hl-proof-dialog-body"><div class="hl-proof-form"><label>Найти<input id="hlProofSearchQuery"></label><label>Заменить<input id="hlProofSearchReplacement"></label><div class="hl-proof-inline"><label><input id="hlProofSearchRegex" type="checkbox"> Regex</label><label><input id="hlProofSearchCase" type="checkbox"> Учитывать регистр</label></div><label>Область<select id="hlProofSearchScope"><option value="all">Вся книга</option><option value="chapter">Текущая глава</option><option value="unreviewed">Только невычитанное</option><option value="changed">Изменённое после вычитки</option></select></label><button id="hlProofSearchPreview" class="hl-proof-small-button primary">Предпросмотр</button></div><div id="hlProofSearchSummary"></div><div id="hlProofSearchResults" class="hl-proof-search-results"></div></div><footer class="hl-proof-dialog-foot"><button id="hlProofReplaceCommit" class="button primary" disabled>Применить показанные замены</button></footer>`;
   $('hlProofSearchClose').onclick = () => dialog.close();
   $('hlProofSearchPreview').onclick = () => previewSearch(chapter?.chapterId);
   $('hlProofReplaceCommit').onclick = commitSearchReplace;
@@ -410,7 +558,7 @@ async function commitSearchReplace() {
     const result = await getService().commitReplace(model.project.projectId, searchPreview);
     if (window.HEARTLINEProjectCore?.flushSourceSave) await window.HEARTLINEProjectCore.flushSourceSave(model.project.projectId, 'autosave');
     $('hlProofSearchDialog')?.close();
-    alert(`Изменено фрагментов: ${result.changedFragments}. Проверенные ранее фрагменты автоматически помечены как изменённые по content hash.`);
+    proofToast(`Изменено фрагментов: ${result.changedFragments}. Ранее вычитанные изменённые фрагменты помечены повторно.`, 'success');
     await reloadModel({ keepSelection: true });
   } catch (error) { alert(error.message || error); }
 }
@@ -423,21 +571,22 @@ function adaptLegacyUi() {
   if (backup) {
     const card = backup.closest('.export-card');
     const paragraph = card?.querySelector('p');
-    if (paragraph) paragraph.textContent = 'Backup исходника + HL context. Статус вычитки теперь управляется в отдельном режиме «Вычитка».';
+    if (paragraph) paragraph.textContent = 'Backup исходника + HL context. Прогресс вычитки ведётся автоматически при чтении.';
   }
-  const more = $('modalBody');
-  const title = $('modalTitle');
-  if (more && title?.textContent === 'Ещё' && !more.querySelector('[data-hl-storyboard-more]')) {
-    const button = document.createElement('button'); button.className = 'button secondary'; button.dataset.hlStoryboardMore = '1'; button.textContent = 'Сториборд';
-    button.onclick = () => { $('modalClose')?.click(); document.querySelector('.mobile-nav [data-route="storyboard"]')?.click(); };
-    more.querySelector('.mobile-more-grid')?.prepend(button);
-  }
+  document.querySelectorAll('.project-card-rich-foot .muted').forEach(node => {
+    if (node.textContent.includes('Продолжить: Читать')) node.textContent = node.textContent.replace('Продолжить: Читать', 'Продолжить: Вычитка');
+  });
+  document.querySelectorAll('[data-hl-storyboard-more]').forEach(button => button.remove());
+  const storyboard = document.querySelector('.mobile-nav [data-route="storyboard"]');
+  if (storyboard) storyboard.style.display = '';
 }
 
-const observer = new MutationObserver(() => { installNavigation(); adaptLegacyUi(); });
+const observer = new MutationObserver(() => { installNavigation(); adaptLegacyUi(); redirectLegacyReaderIfNeeded(); });
 observer.observe(document.documentElement, { childList: true, subtree: true });
+document.addEventListener('keydown', proofreadingHotkeys);
 installStyles();
 installNavigation();
 adaptLegacyUi();
+redirectLegacyReaderIfNeeded();
 
 window.HEARTLINEProofreading = Object.freeze({ open: openProofreading, get service() { return getService(); } });

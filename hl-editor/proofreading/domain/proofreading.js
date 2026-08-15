@@ -1,12 +1,4 @@
-export const PROOFREADING_FORMAT_VERSION = 1;
-
-export const DEFAULT_PASSES = Object.freeze([
-  { id: 'read', label: 'Первичное чтение', description: 'Смысл, естественность, очевидные ошибки.', enabled: true },
-  { id: 'proof', label: 'Орфография и пунктуация', description: 'Орфография, пунктуация, пробелы, типографика.', enabled: true },
-  { id: 'style', label: 'Стиль', description: 'Повторы, ритм, диалоги, голос персонажей.', enabled: true },
-  { id: 'continuity', label: 'Логика и continuity', description: 'Факты, последовательность, ветки и персонажи.', enabled: true },
-  { id: 'final', label: 'Финальная проверка', description: 'Последний проход по уже исправленному тексту.', enabled: true }
-]);
+export const PROOFREADING_FORMAT_VERSION = 2;
 
 export const UNIT_STATES = Object.freeze(['not-started', 'in-progress', 'attention', 'reviewed', 'approved', 'changed']);
 export const REVIEW_WORKFLOW_STATES = Object.freeze(['open', 'fix-proposed', 'verify', 'resolved', 'wont-fix']);
@@ -31,6 +23,10 @@ export const DEFAULT_RULES = Object.freeze({
 const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
 const escapeRegExp = value => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+const STYLE_STOP_WORDS = new Set([
+  'и','а','но','или','что','как','это','в','во','на','с','со','к','ко','у','о','об','от','до','за','по','из','для','при','не','ни','же','бы','б','то','я','ты','он','она','оно','мы','вы','они','его','ее','её','их','мой','твой','свой','этот','эта','эти','тот','та','те','был','была','были','быть','есть'
+]);
+
 export function reviewFingerprint(value) {
   const text = String(value ?? '');
   let hash = 0xcbf29ce484222325n;
@@ -48,51 +44,41 @@ export function reviewFingerprint(value) {
 export function createDefaultProofreadingState(now = new Date().toISOString()) {
   return {
     formatVersion: PROOFREADING_FORMAT_VERSION,
-    activePassId: 'read',
-    passes: DEFAULT_PASSES.map(pass => ({ ...pass })),
     units: {},
     dictionary: { terms: [], ignoredWords: [], forbiddenWords: [] },
     rules: { ...DEFAULT_RULES },
+    styleGuide: { notes: '' },
     ignoredFindingKeys: [],
     updatedAt: now
   };
 }
 
+function newestLegacyPassRecord(record) {
+  const values = Object.values(record?.passes || {}).filter(item => item?.reviewedHash);
+  if (!values.length) return null;
+  return values.sort((a, b) => String(b.reviewedAt || '').localeCompare(String(a.reviewedAt || '')))[0];
+}
+
 export function normalizeProofreadingState(value, now = new Date().toISOString()) {
   const base = createDefaultProofreadingState(now);
   if (!value || typeof value !== 'object') return base;
-  const passes = Array.isArray(value.passes) && value.passes.length
-    ? value.passes.map(pass => ({
-        id: String(pass.id || ''),
-        label: String(pass.label || pass.id || 'Проход'),
-        description: String(pass.description || ''),
-        enabled: pass.enabled !== false
-      })).filter(pass => pass.id)
-    : base.passes;
-  const passIds = new Set(passes.map(pass => pass.id));
   const units = {};
   for (const [fragmentId, record] of Object.entries(value.units || {})) {
-    const passRecords = {};
-    for (const [passId, passRecord] of Object.entries(record?.passes || {})) {
-      if (!passIds.has(passId)) continue;
-      passRecords[passId] = {
-        status: ['reviewed', 'approved'].includes(passRecord?.status) ? passRecord.status : 'reviewed',
-        reviewedHash: passRecord?.reviewedHash || null,
-        reviewedAt: passRecord?.reviewedAt || null
-      };
-    }
-    units[fragmentId] = { passes: passRecords, updatedAt: record?.updatedAt || null };
+    const source = record?.reviewedHash ? record : newestLegacyPassRecord(record);
+    if (!source?.reviewedHash) continue;
+    units[fragmentId] = {
+      status: source.status === 'approved' ? 'approved' : 'reviewed',
+      reviewedHash: source.reviewedHash,
+      reviewedAt: source.reviewedAt || record?.updatedAt || null,
+      updatedAt: record?.updatedAt || source.reviewedAt || null
+    };
   }
-  const activePassId = passIds.has(value.activePassId) && passes.find(pass => pass.id === value.activePassId)?.enabled !== false
-    ? value.activePassId
-    : passes.find(pass => pass.enabled)?.id || passes[0]?.id || 'read';
   return {
     formatVersion: PROOFREADING_FORMAT_VERSION,
-    activePassId,
-    passes,
     units,
     dictionary: normalizeDictionary(value.dictionary),
     rules: { ...DEFAULT_RULES, ...(value.rules || {}) },
+    styleGuide: { notes: String(value.styleGuide?.notes || value.styleNotes || '') },
     ignoredFindingKeys: Array.isArray(value.ignoredFindingKeys) ? [...new Set(value.ignoredFindingKeys.map(String))] : [],
     updatedAt: value.updatedAt || now
   };
@@ -137,8 +123,8 @@ export function isReviewOpen(review) {
   return !['resolved', 'wont-fix'].includes(workflowStatusFromLegacy(review));
 }
 
-export function deriveUnitState({ state, fragmentId, passId, currentText, reviews = [] }) {
-  const record = state?.units?.[fragmentId]?.passes?.[passId] || null;
+export function deriveUnitState({ state, fragmentId, currentText, reviews = [] }) {
+  const record = state?.units?.[fragmentId] || null;
   const currentHash = reviewFingerprint(currentText);
   const openReviews = reviews.filter(review => review.fragmentId === fragmentId && review.targetType !== 'image' && isReviewOpen(review));
   if (openReviews.length) return { status: 'attention', currentHash, record, openReviews };
@@ -147,16 +133,14 @@ export function deriveUnitState({ state, fragmentId, passId, currentText, review
   return { status: record.status === 'approved' ? 'approved' : 'reviewed', currentHash, record, openReviews };
 }
 
-export function markUnitPass(state, fragmentId, passId, currentText, at, approved = false) {
+export function markUnitReviewed(state, fragmentId, currentText, at, approved = false) {
   const next = normalizeProofreadingState(clone(state), at);
-  next.units[fragmentId] ||= { passes: {}, updatedAt: at };
-  next.units[fragmentId].passes ||= {};
-  next.units[fragmentId].passes[passId] = {
+  next.units[fragmentId] = {
     status: approved ? 'approved' : 'reviewed',
     reviewedHash: reviewFingerprint(currentText),
-    reviewedAt: at
+    reviewedAt: at,
+    updatedAt: at
   };
-  next.units[fragmentId].updatedAt = at;
   next.updatedAt = at;
   return next;
 }
@@ -227,6 +211,7 @@ export function flattenProofreadingUnits(content) {
             path: nextPath,
             type: step.type,
             speaker: step.speaker || '',
+            options: step.type === 'choice' ? (step.options || []).map(option => ({ id: String(option.id || ''), label: String(option.label || option.id || '') })) : [],
             sourceText: step.type === 'choice' ? (step.prompt || '') : (step.text || '')
           });
         }
@@ -319,6 +304,82 @@ export function runDeterministicChecks(text, stateOrConfig = {}) {
   }
 
   return findings.sort((a, b) => a.startOffset - b.startOffset || a.endOffset - b.endOffset);
+}
+
+export function analyzeNovelStyle(units, stateOrConfig = {}) {
+  const list = Array.isArray(units) ? units : [];
+  const state = stateOrConfig?.rules ? stateOrConfig : createDefaultProofreadingState();
+  const wordRegex = /[\p{L}\p{N}Ёё’'-]+/gu;
+  const frequency = new Map();
+  const unique = new Set();
+  const sentenceLengths = [];
+  let words = 0;
+  let dialogueWords = 0;
+  let narrationWords = 0;
+  let thoughtWords = 0;
+  let findings = 0;
+  let openReviews = 0;
+  let criticalReviews = 0;
+  let changed = 0;
+  let reviewed = 0;
+
+  for (const unit of list) {
+    const text = String(unit.text ?? unit.sourceText ?? '');
+    const tokens = [...text.matchAll(wordRegex)].map(match => match[0]);
+    words += tokens.length;
+    if (unit.type === 'dialogue') dialogueWords += tokens.length;
+    else if (unit.type === 'thought') thoughtWords += tokens.length;
+    else narrationWords += tokens.length;
+    for (const token of tokens) {
+      const normalized = token.toLocaleLowerCase('ru-RU').replace(/^[-’']+|[-’']+$/g, '');
+      if (!normalized) continue;
+      unique.add(normalized);
+      if (normalized.length >= 3 && !STYLE_STOP_WORDS.has(normalized)) frequency.set(normalized, (frequency.get(normalized) || 0) + 1);
+    }
+    const sentences = text.split(/(?<=[.!?…])(?:[»”"']*)\s+/u).map(item => item.trim()).filter(Boolean);
+    if (!sentences.length && text.trim()) sentences.push(text.trim());
+    for (const sentence of sentences) sentenceLengths.push((sentence.match(wordRegex) || []).length);
+    findings += runDeterministicChecks(text, state).length;
+    const reviews = Array.isArray(unit.reviews) ? unit.reviews : [];
+    const unresolved = reviews.filter(isReviewOpen);
+    openReviews += unresolved.length;
+    criticalReviews += unresolved.filter(review => review.severity === 'critical').length;
+    if (unit.status === 'changed') changed++;
+    if (unit.status === 'reviewed' || unit.status === 'approved') reviewed++;
+  }
+
+  const sentences = sentenceLengths.length;
+  const avgSentenceWords = sentences ? Math.round((sentenceLengths.reduce((sum, value) => sum + value, 0) / sentences) * 10) / 10 : 0;
+  const longSentences = sentenceLengths.filter(value => value >= 28).length;
+  const veryLongSentences = sentenceLengths.filter(value => value >= 40).length;
+  const uniqueWordPercent = words ? Math.round(unique.size / words * 100) : 0;
+  const dialoguePercent = words ? Math.round(dialogueWords / words * 100) : 0;
+  const reviewedPercent = list.length ? Math.round(reviewed / list.length * 100) : 0;
+  const findingRate = words ? Math.round(findings / words * 1000 * 10) / 10 : 0;
+  const changedPercent = list.length ? Math.round(changed / list.length * 100) : 0;
+  const openPenalty = Math.min(28, openReviews * 2 + criticalReviews * 4);
+  const findingPenalty = Math.min(22, findingRate * 1.5);
+  const reviewPenalty = Math.min(40, (100 - reviewedPercent) * 0.4);
+  const changedPenalty = Math.min(10, changedPercent * 0.5);
+  const readinessScore = Math.max(0, Math.min(100, Math.round(100 - openPenalty - findingPenalty - reviewPenalty - changedPenalty)));
+  const readinessLabel = readinessScore >= 90 ? 'Высокая' : readinessScore >= 75 ? 'Хорошая' : readinessScore >= 55 ? 'Средняя' : 'Требует работы';
+  const frequentWords = [...frequency.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'ru')).slice(0, 12).map(([word, count]) => ({ word, count }));
+  const signals = [];
+  if (sentences && longSentences / sentences >= 0.22) signals.push('Высокая доля длинных предложений: проверьте ритм и читаемость.');
+  if (veryLongSentences) signals.push(`Очень длинных предложений (40+ слов): ${veryLongSentences}.`);
+  if (dialoguePercent >= 70) signals.push('Текст сильно опирается на диалоги; проверьте различимость голосов персонажей.');
+  if (dialoguePercent <= 15 && words > 300) signals.push('Диалогов мало; проверьте, соответствует ли это выбранной манере повествования.');
+  if (words > 500 && uniqueWordPercent < 28) signals.push('Невысокая лексическая вариативность: возможны заметные повторы.');
+  if (findingRate > 10) signals.push('Много локальных технических замечаний на 1000 слов.');
+  if (!signals.length) signals.push('Явных технических стилевых перекосов по текущим метрикам не обнаружено.');
+
+  return {
+    words, sentences, avgSentenceWords, longSentences, veryLongSentences, uniqueWordPercent,
+    dialoguePercent, dialogueWords, narrationWords, thoughtWords, findings, findingRate,
+    openReviews, criticalReviews, reviewedPercent, changedPercent, readinessScore, readinessLabel,
+    frequentWords, signals, styleNotes: String(state.styleGuide?.notes || ''),
+    disclaimer: 'Редакционная готовность отражает прогресс вычитки и технические сигналы, а не художественную ценность произведения.'
+  };
 }
 
 export function validateRegexPattern(pattern) {

@@ -56,7 +56,7 @@ test('workspace model reports progress per chapter and shared review route', asy
   assert.equal(model.routeCoverage.routes[1].completed,1);
 });
 
-test('open review blocks marking a fragment reviewed', async () => {
+test('open review blocks automatic forward completion of a fragment', async () => {
   const repo=new MemoryRepo(); const service=makeService(repo);
   await service.createReview('p1',{fragmentId:'f1',comment:'Проверить',startOffset:0,endOffset:5});
   await assert.rejects(()=>service.markUnit('p1','f1'),/открытых замечаний/);
@@ -101,12 +101,26 @@ test('scene completion skips fragments with unresolved reviews', async () => {
   assert.equal(result.completed,0);
 });
 
-test('final book approval calls hash-bound project review after granular completion', async () => {
+test('whole book completion invokes hash-bound project review when source is saved', async () => {
   const repo=new MemoryRepo(); const calls=[]; const service=makeService(repo,calls);
-  await service.selectPass('p1','final');
-  const result=await service.markProject('p1',{passId:'final',approved:true});
+  const result=await service.markProject('p1');
   assert.equal(result.skipped.length,0);
   assert.ok(calls.some(call=>call[0]==='project-review'));
+});
+
+test('style guide is stored in the same proofreading context', async () => {
+  const repo=new MemoryRepo(); const service=makeService(repo);
+  await service.saveStyleGuide('p1','Короткие фразы и сдержанная ирония.');
+  const model=await service.load('p1');
+  assert.match(model.state.styleGuide.notes,/Короткие фразы/);
+});
+
+test('novel analysis reports editorial readiness and style metrics', async () => {
+  const repo=new MemoryRepo(); const service=makeService(repo);
+  const report=await service.analyzeNovel('p1');
+  assert.equal(report.words>0,true);
+  assert.equal(report.readinessScore>=0 && report.readinessScore<=100,true);
+  assert.match(report.disclaimer,/художественную ценность/i);
 });
 
 test('legacy quoted review gets upgraded when quote is unique', async () => {

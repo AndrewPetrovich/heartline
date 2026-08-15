@@ -1,105 +1,98 @@
-# HEARTLINE Editor 3.5 — Proofreading Workspace
+# HEARTLINE Editor 3.5.1 — Unified Reader + Proofreading
 
-## Purpose
+## Основной принцип
 
-Version 3.5 makes proofreading a first-class workflow instead of treating it as a side effect of Reader comments.
+Вычитка и чтение больше не являются отдельными рабочими режимами. Пользователь читает новеллу в одном **Proofreading Reader** и по мере продвижения фиксирует состояние проверки.
 
-The working loop is:
-
-```text
-open next unchecked fragment
-→ read/edit
-→ add durable anchored issue if needed
-→ resolve/verify issue
-→ mark fragment/scene/chapter reviewed
-→ content hash guards the review state
-→ final pass can approve the whole source project
-```
-
-## Granular review state
-
-Proofreading state is stored inside the project workspace context and therefore participates in the existing `.hl-editor/project-context.json` checkpoint.
-
-Review is tracked per `fragmentId` and per pass. Default passes:
-
-1. Первичное чтение
-2. Орфография и пунктуация
-3. Стиль
-4. Логика и continuity
-5. Финальная проверка
-
-Each reviewed unit stores a content fingerprint. If only one fragment changes later, only that fragment becomes `changed`; unrelated chapters remain reviewed. Scene/chapter/book status is derived from child units and is never a second source of truth.
-
-Open text issues take precedence over a reviewed flag, so a fragment with an unresolved issue cannot be completed accidentally.
-
-## Durable text anchors
-
-New proofreading issues store:
-
-- `fragmentId`;
-- `startOffset` / `endOffset`;
-- selected `quotedText`;
-- short prefix/suffix context;
-- fragment content hash.
-
-When surrounding text changes, HEARTLINE tries to relocate the quote using its context. Ambiguous or stale anchors are surfaced rather than silently pointing to the wrong text. Legacy quote-only comments are upgraded automatically when their quote is unique in the fragment.
-
-## Issue workflow
-
-The proofreading UI uses a small editorial state machine:
+Главный цикл:
 
 ```text
-open → fix-proposed → verify → resolved
-                       ↘ wont-fix
+прочитать текущий фрагмент
+→ при необходимости исправить / добавить замечание
+→ нажать «Вперёд»
+→ сохранить текущую правку
+→ если нет открытых замечаний: отметить fragmentId вычитанным с current text hash
+→ перейти к следующему фрагменту
 ```
 
-Legacy HEARTLINE review statuses remain as compatibility fields, but GPT is no longer represented as a status. Automation origin belongs in `review.automation`.
+Кнопки `Первая / Назад / Вперёд / Последняя` повторяют привычную читательскую навигацию. Только `Вперёд` автоматически завершает текущий фрагмент. Переход назад или прямой выбор фрагмента не меняют статус проверки.
 
-## Editing and visual independence
+Если у текущего фрагмента есть открытое замечание, `Вперёд` не блокирует чтение: пользователь переходит дальше, но фрагмент остаётся в состоянии `attention` и не считается вычитанным.
 
-Edits made from Proofreading Workspace update `workspace.textEdits` and the normal change-event history, but they do **not** invalidate approved visual assignments. Punctuation and spelling changes therefore do not create fake visual work.
+## Один статус вместо проходов
 
-Semantic visual impact remains an explicit production decision in the visual workflow.
+Стадии `Первичное чтение / Орфография / Стиль / Continuity / Финальная проверка` удалены.
 
-## Search / replace
+Состояние хранится один раз на `fragmentId`:
 
-Search supports:
+```text
+not-started | attention | reviewed | changed
+```
 
-- entire book;
-- current chapter;
-- only unchecked fragments;
-- only fragments changed after review;
-- case sensitivity;
-- safe regular expressions;
-- preview before commit.
+Запись `reviewed` содержит `reviewedHash` и `reviewedAt`. Если текст изменился после вычитки, только этот fragmentId становится `changed`.
 
-Bulk replace creates a safety revision for source-backed projects before changing the workspace. Source save then runs through the existing conflict/recovery pipeline.
+Формат proofreading context повышен до `formatVersion: 2`. Состояние 3.5.0 с `passes` мигрирует автоматически: для каждого fragmentId берётся самый новый сохранённый reviewed record. Никакой новый projectId не создаётся.
 
-## Local deterministic checks
+## Reader UX внутри «Вычитки»
 
-The built-in checker never sends novel text to an external service. It can report:
+Режим унаследовал функции чтения:
 
-- repeated spaces;
-- whitespace before punctuation;
-- trailing whitespace;
-- repeated adjacent words;
-- mixed Cyrillic/Latin tokens;
-- straight quotes in Russian-text policy;
-- hyphen between spaces instead of dash;
-- optional repeated punctuation;
-- project terminology variants;
-- configured forbidden words/forms.
+- предыдущий контекст `0 / 1 / 2 / auto`;
+- литературный serif или нейтральный sans-serif;
+- размер текста;
+- интерлиньяж;
+- ширина колонки;
+- режим фокуса;
+- первая / предыдущая / следующая / последняя реплика;
+- отображение вариантов Choice рядом с prompt.
 
-Findings can be fixed when a deterministic replacement exists, converted to a normal anchored review issue, or ignored.
+Настройки используют существующий `heartline-reader-prefs-v1`, поэтому пользовательские Reader preferences сохраняются.
 
-## Project dictionary
+Навигационная вкладка `Читать` скрыта. Любой legacy-переход приложения в Reader автоматически перенаправляется в «Вычитку» с сохранением текущего fragmentId.
 
-The project proofreading context stores canonical terms, known variants and notes. This is intended for names, locations, titles, forms of address and other terminology that generic spellcheckers cannot know.
+## Стиль и качество
 
-## Interactive-route coverage
+HEARTLINE не пытается вычислять «художественную ценность». Вместо этого он показывает **редакционную готовность** и стилевой профиль:
 
-If source metadata contains `reviewRoutes`, Proofreading Workspace calculates route coverage from scene completion. Shared scenes are reviewed once and contribute to every route containing them; branch-exclusive scenes remain visible until covered.
+- объём текста;
+- среднюю длину предложения;
+- количество очень длинных предложений;
+- долю диалогов;
+- лексическое разнообразие;
+- частые содержательные слова;
+- число локальных технических сигналов на 1000 слов;
+- открытые/критические замечания;
+- прогресс вычитки;
+- текстовые стилевые сигналы.
 
-## Final approval
+Есть поле **«Редакторская установка стиля»**, где можно зафиксировать целевой голос произведения: например, длину фраз, тон, допустимую иронию, ограничения по канцеляризмам и т.п. Эти данные входят в проектный proofreading context.
 
-Granular completion is independent from the project-level source hash. On the final pass, completing the whole book also calls Project Core's hash-bound review/approval use case for source-backed projects. A later source change therefore invalidates project approval while preserving granular information about exactly which fragment changed.
+Числовой показатель называется `Редакционная готовность`, а не «оценка качества книги». В UI явно указано, что он не оценивает художественную ценность произведения.
+
+## Замечания, проверки и словарь
+
+Сохраняются возможности 3.5.0:
+
+- устойчивые anchors по offsets + quote + prefix/suffix + hash;
+- workflow замечаний `open → fix-proposed → verify → resolved / wont-fix`;
+- локальные детерминированные проверки;
+- словарь терминологии;
+- safe search/replace с preview;
+- safety revision перед массовой заменой;
+- coverage интерактивных reviewRoutes.
+
+Правки из Proofreading Reader по-прежнему не инвалидируют approved visual assignment автоматически.
+
+## Source safety
+
+Изменение текста остаётся в существующем pipeline:
+
+```text
+workspace dirty
+→ Project Core debounce
+→ source hash conflict check
+→ recovery/revision
+→ source save
+```
+
+На последнем `Вперёд` source-backed workspace принудительно flush-ится. Если вся книга вычитана и source находится в `saved`, Project Core может связать глобальный project review с актуальным source hash.

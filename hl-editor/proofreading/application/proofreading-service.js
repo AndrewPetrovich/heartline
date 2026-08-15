@@ -1,10 +1,10 @@
 import { assertProofreadingRepository } from '../ports/proofreading-repository.js';
 import {
   TEXT_REVIEW_CATEGORIES, REVIEW_WORKFLOW_STATES,
-  normalizeProofreadingState, deriveUnitState, markUnitPass, flattenProofreadingUnits,
+  normalizeProofreadingState, deriveUnitState, markUnitReviewed, flattenProofreadingUnits,
   aggregateStatuses, createTextAnchor, resolveTextAnchor, runDeterministicChecks,
   workflowStatusFromLegacy, legacyStatusFromWorkflow, isReviewOpen, reviewFingerprint,
-  findTextMatches, replaceTextMatches, extractReviewRouteSceneIds
+  findTextMatches, replaceTextMatches, extractReviewRouteSceneIds, analyzeNovelStyle
 } from '../domain/proofreading.js';
 
 const clone = value => typeof structuredClone === 'function' ? structuredClone(value) : JSON.parse(JSON.stringify(value));
@@ -37,19 +37,16 @@ export class ProofreadingService {
     return (await this.repository.getMostRecentProject())?.projectId || null;
   }
 
-  async load(projectId, requestedPassId = null) {
+  async load(projectId) {
     const bundle = await this.repository.getProjectBundle(projectId);
     if (!bundle) throw new Error('Проект для вычитки не найден');
     const now = this.clock();
-    let state = normalizeProofreadingState(bundle.workspace.proofreading, now);
-    if (requestedPassId && state.passes.some(pass => pass.id === requestedPassId && pass.enabled)) state.activePassId = requestedPassId;
-    const activePass = state.passes.find(pass => pass.id === state.activePassId && pass.enabled) || state.passes.find(pass => pass.enabled) || state.passes[0];
-    state.activePassId = activePass?.id || 'read';
+    const state = normalizeProofreadingState(bundle.workspace.proofreading, now);
     const units = flattenProofreadingUnits(bundle.content).map(unit => ({ ...unit, text: effectiveText(unit, bundle.workspace) }));
     const reviewByFragment = groupBy(bundle.reviews.filter(review => review.targetType !== 'image'), review => review.fragmentId);
     const modeled = units.map((unit, index) => {
       const reviews = reviewByFragment.get(unit.fragmentId) || [];
-      const derived = deriveUnitState({ state, fragmentId: unit.fragmentId, passId: state.activePassId, currentText: unit.text, reviews });
+      const derived = deriveUnitState({ state, fragmentId: unit.fragmentId, currentText: unit.text, reviews });
       return {
         ...unit,
         index,
@@ -84,7 +81,6 @@ export class ProofreadingService {
       sourceBacked: Boolean(bundle.binding || bundle.project.sourceBacked),
       workspace: bundle.workspace,
       state,
-      activePass,
       units: modeled,
       scenes,
       chapters,
@@ -124,67 +120,43 @@ export class ProofreadingService {
     return { routes: normalized, completed: normalized.filter(route => route.completed === route.total).length, total: normalized.length };
   }
 
-  async selectPass(projectId, passId) {
-    const bundle = await this.repository.getProjectBundle(projectId);
-    if (!bundle) throw new Error('Проект не найден');
-    const state = normalizeProofreadingState(bundle.workspace.proofreading, this.clock());
-    const pass = state.passes.find(item => item.id === passId);
-    if (!pass || !pass.enabled) throw new Error('Проход вычитки недоступен');
-    state.activePassId = passId;
-    state.updatedAt = this.clock();
-    await this.repository.saveProofreadingState(projectId, state);
-    return state;
-  }
-
-  async setPassEnabled(projectId, passId, enabled) {
-    const bundle = await this.repository.getProjectBundle(projectId);
-    if (!bundle) throw new Error('Проект не найден');
-    const state = normalizeProofreadingState(bundle.workspace.proofreading, this.clock());
-    const pass = state.passes.find(item => item.id === passId);
-    if (!pass) throw new Error('Проход не найден');
-    pass.enabled = Boolean(enabled);
-    if (!state.passes.some(item => item.enabled)) pass.enabled = true;
-    if (!state.passes.find(item => item.id === state.activePassId)?.enabled) state.activePassId = state.passes.find(item => item.enabled)?.id || passId;
-    state.updatedAt = this.clock();
-    await this.repository.saveProofreadingState(projectId, state);
-    return state;
-  }
-
-  async markUnit(projectId, fragmentId, { passId = null, approved = false } = {}) {
-    const model = await this.load(projectId, passId);
+  async markUnit(projectId, fragmentId, { approved = false } = {}) {
+    const model = await this.load(projectId);
     const unit = model.units.find(item => item.fragmentId === fragmentId);
     if (!unit) throw new Error('Фрагмент не найден');
     const unresolved = unit.reviews.filter(review => isReviewOpen(review));
-    if (unresolved.length) throw new Error(`Нельзя завершить фрагмент: открытых замечаний ${unresolved.length}`);
-    const next = markUnitPass(model.state, fragmentId, model.state.activePassId, unit.text, this.clock(), approved);
+    if (unresolved.length) throw new Error(`Нельзя отметить фрагмент вычитанным: открытых замечаний ${unresolved.length}`);
+    const next = markUnitReviewed(model.state, fragmentId, unit.text, this.clock(), approved);
     await this.repository.saveProofreadingState(projectId, next);
+    const completedModel = await this.load(projectId);
+    if (completedModel.progress.percent === 100 && completedModel.sourceBacked && !completedModel.workspace.dirty && completedModel.workspace.saveState === 'saved' && this.projectService) {
+      await this.projectService.markProjectReviewed(projectId, { approved: false }).catch(() => null);
+    }
     return next;
   }
 
-  async markScope(projectId, { sceneId = null, chapterId = null, passId = null, approved = false } = {}) {
-    const model = await this.load(projectId, passId);
+  async markScope(projectId, { sceneId = null, chapterId = null, approved = false } = {}) {
+    const model = await this.load(projectId);
     const target = model.units.filter(unit => !sceneId || unit.sceneId === sceneId).filter(unit => !chapterId || unit.chapterId === chapterId);
     let state = model.state;
     const skipped = [];
     let completed = 0;
     for (const unit of target) {
       if (unit.reviews.some(review => isReviewOpen(review))) { skipped.push(unit.fragmentId); continue; }
-      state = markUnitPass(state, unit.fragmentId, state.activePassId, unit.text, this.clock(), approved);
+      state = markUnitReviewed(state, unit.fragmentId, unit.text, this.clock(), approved);
       completed++;
     }
     await this.repository.saveProofreadingState(projectId, state);
     return { completed, skipped, state };
   }
 
-  async markProject(projectId, { passId = null, approved = false } = {}) {
-    const result = await this.markScope(projectId, { passId, approved });
+  async markProject(projectId, { approved = false } = {}) {
+    const result = await this.markScope(projectId, { approved });
     if (result.skipped.length) return { ...result, projectReview: null };
-    const model = await this.load(projectId, passId);
-    const finalPass = model.state.activePassId === 'final';
+    const model = await this.load(projectId);
     let projectReview = null;
-    if (finalPass && this.projectService) {
-      const binding = model.sourceBacked;
-      if (binding) projectReview = await this.projectService.markProjectReviewed(projectId, { approved });
+    if (model.sourceBacked && !model.workspace.dirty && model.workspace.saveState === 'saved' && this.projectService) {
+      projectReview = await this.projectService.markProjectReviewed(projectId, { approved });
     }
     return { ...result, projectReview };
   }
@@ -340,6 +312,21 @@ export class ProofreadingService {
     state.updatedAt = this.clock();
     await this.repository.saveProofreadingState(projectId, state);
     return state;
+  }
+
+  async analyzeNovel(projectId) {
+    const model = await this.load(projectId);
+    return analyzeNovelStyle(model.units, model.state);
+  }
+
+  async saveStyleGuide(projectId, notes) {
+    const bundle = await this.repository.getProjectBundle(projectId);
+    if (!bundle) throw new Error('Проект не найден');
+    const state = normalizeProofreadingState(bundle.workspace.proofreading, this.clock());
+    state.styleGuide = { ...(state.styleGuide || {}), notes: String(notes || '').trim() };
+    state.updatedAt = this.clock();
+    await this.repository.saveProofreadingState(projectId, state);
+    return state.styleGuide;
   }
 
   search(model, { query, replacement = '', regex = false, caseSensitive = false, scope = 'all', chapterId = null } = {}) {

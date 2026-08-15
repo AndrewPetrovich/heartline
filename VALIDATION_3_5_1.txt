@@ -1,0 +1,26 @@
+HEARTLINE Editor 3.5.1 — validation
+
+Base verified on GitHub before implementation:
+5cd9637c56f4f54a6465968b53dc5889157c901e
+
+Full regression suite executed against the 3.5 codebase + 3.5.1 changes:
+
+npm test
+36 tests / 36 PASS
+
+npm run check
+PASS
+
+Key 3.5.1 regressions:
+- one continuous proofreading state; no review passes;
+- automatic migration of 3.5.0 pass-based records;
+- fragment reviewedHash remains granular;
+- open review prevents automatic reviewed status;
+- proofreading edits do not invalidate approved visuals;
+- style guide persists in proofreading context;
+- novel style analysis returns editorial readiness and style metrics;
+- analysis explicitly does not claim to measure artistic value;
+- all 14 Project Core data-safety tests remain PASS.
+
+Repository integrity command to run after applying on the actual checkout:
+npm run verify-repository
