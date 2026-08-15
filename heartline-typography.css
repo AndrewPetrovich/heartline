@@ -1,7 +1,6 @@
-/* HEARTLINE 3.5.2 typography policy
-   The UI intentionally uses no bold/extra-bold faces.
+/* HEARTLINE 3.5.2 readability + typography policy
    400 = body text; 600 = strongest permitted emphasis (semibold).
-   !important is deliberate: legacy 3.x modules contain 650–850 weights.
+   This stylesheet is intentionally loaded last and overrides legacy 3.x typography.
 */
 html,body{font-synthesis:none}
 html body *{font-weight:400!important}
@@ -31,3 +30,132 @@ html body :is(
   .hl-proof-quality-score b,.hl-proof-quality-grid b,
   .hl-proof-choice-options>span
 ) *{font-weight:inherit!important}
+
+/* Global readability floor for the existing HEARTLINE UI. */
+body{font-size:15px!important}
+button,input,select,textarea{font-size:14px!important}
+.nav-button{font-size:13px!important}
+.brand strong{font-size:13px!important}
+.brand small{font-size:11px!important}
+.button.small{font-size:13px!important}
+.kicker{font-size:11px!important}
+.status-badge{font-size:11px!important}
+.field>span{font-size:12px!important}
+small{font-size:11px!important}
+.project-card-meta,.reader-title span{font-size:12px!important}
+.input,.select,.textarea{font-size:14px!important}
+.page-header p,.muted{line-height:1.5}
+
+/* The proofreading toolbar should stay focused on reading.
+   These secondary actions remain in code/data for compatibility but are not shown. */
+#hlProofPending,#hlProofSearch,#hlProofQuality{display:none!important}
+
+/* Proofreading workspace: readable navigation, metadata and comments. */
+.hl-proof-toolbar{gap:10px!important;padding:11px 16px!important}
+.hl-proof-title{min-width:250px!important}
+.hl-proof-title strong{font-size:15px!important;line-height:1.25!important}
+.hl-proof-title span{font-size:12px!important;line-height:1.4!important}
+.hl-proof-progress small{font-size:12px!important}
+
+.hl-proof-grid{
+  grid-template-columns:minmax(290px,340px) minmax(520px,1fr) minmax(330px,400px)!important
+}
+.hl-proof-outline{padding:12px!important}
+.hl-proof-book-summary{gap:8px!important;margin:8px 0 14px!important}
+.hl-proof-metric{padding:10px 8px!important}
+.hl-proof-metric strong{font-size:18px!important;line-height:1.15!important}
+.hl-proof-metric span{font-size:11px!important;line-height:1.35!important}
+
+.hl-proof-chapter{margin-bottom:10px!important}
+.hl-proof-chapter>summary{padding:10px 11px!important;gap:9px!important}
+.hl-proof-chapter>summary strong{font-size:13px!important;line-height:1.3!important}
+.hl-proof-chapter>summary small{font-size:11px!important;line-height:1.3!important}
+
+.hl-proof-scene-head{padding:9px 10px!important;gap:8px!important}
+.hl-proof-scene-head strong{font-size:13px!important;line-height:1.35!important}
+.hl-proof-scene-head small{font-size:11px!important;line-height:1.35!important}
+.hl-proof-units{padding:1px 7px 9px!important;gap:4px!important}
+.hl-proof-unit{
+  font-size:13px!important;
+  line-height:1.35!important;
+  grid-template-columns:9px 1fr auto!important;
+  gap:8px!important;
+  padding:7px 8px!important
+}
+.hl-proof-unit small{font-size:11px!important}
+.hl-proof-dot{width:8px!important;height:8px!important}
+
+.hl-proof-center{padding:22px 28px!important}
+.hl-proof-editor-head{padding:15px 18px 0!important}
+.hl-proof-editor-head .kicker{font-size:11px!important}
+.hl-proof-editor-head h2{font-size:16px!important;line-height:1.3!important;margin:4px 0!important}
+.hl-proof-editor-head p{font-size:12px!important;line-height:1.4!important}
+.hl-proof-status-pill{font-size:12px!important;padding:6px 9px!important}
+.hl-proof-context{
+  padding:13px 18px!important;
+  font-size:15px!important;
+  line-height:1.6!important
+}
+.hl-proof-editor-wrap{padding:16px 18px!important}
+.hl-proof-editor{
+  font-size:calc(20px * var(--hl-proof-text-scale,1))!important;
+  line-height:var(--hl-proof-line-height,1.6)!important
+}
+.hl-proof-highlight-note{font-size:12px!important;line-height:1.5!important;margin-top:8px!important}
+.hl-proof-editor-actions{padding:0 18px 16px!important;gap:8px!important}
+.hl-proof-save-state{font-size:11px!important}
+.hl-proof-choice-options>span{font-size:11px!important}
+.hl-proof-choice-options>div{font-size:14px!important;line-height:1.5!important}
+
+.hl-proof-right-body{padding:14px!important;font-size:13px!important}
+.hl-proof-right-head{padding:12px 14px!important}
+.hl-proof-right-head strong{font-size:14px!important}
+.hl-proof-section-title{margin:6px 0 10px!important}
+.hl-proof-section-title h3{font-size:14px!important}
+.hl-proof-review-card,.hl-proof-finding,.hl-proof-term{padding:11px!important;margin-bottom:9px!important}
+.hl-proof-review-card strong,.hl-proof-finding strong{font-size:13px!important;line-height:1.4!important}
+.hl-proof-review-card p,.hl-proof-finding p{font-size:13px!important;line-height:1.55!important}
+.hl-proof-quote{font-size:13px!important;line-height:1.5!important}
+.hl-proof-anchor-stale{font-size:11px!important}
+.hl-proof-form{gap:10px!important}
+.hl-proof-form label{font-size:12px!important;line-height:1.35!important}
+.hl-proof-form input,.hl-proof-form textarea,.hl-proof-form select{font-size:14px!important;line-height:1.45!important;padding:9px!important}
+.hl-proof-small-button{font-size:12px!important;padding:7px 9px!important}
+.hl-proof-empty{font-size:12px!important;line-height:1.5!important}
+.hl-proof-help{font-size:12px!important;line-height:1.55!important}
+.hl-proof-finding-code{font-size:11px!important}
+.hl-proof-route,.hl-proof-frequency{font-size:12px!important}
+.hl-proof-route-coverage h3{font-size:13px!important}
+.hl-proof-dialog-head h2{font-size:16px!important}
+.hl-proof-search-row header{font-size:12px!important}
+.hl-proof-search-row pre{font-size:12px!important;line-height:1.5!important}
+
+.hl-proof-reader-nav{gap:9px!important;padding:11px 14px!important}
+.hl-proof-reader-nav .button{font-size:13px!important;min-height:40px!important}
+.hl-proof-reader-nav span{font-size:12px!important}
+
+/* Legacy Reader / other app surfaces: remove the most common micro-text. */
+.scene-link{font-size:12px!important;line-height:1.4!important}
+.chapter-title{font-size:12px!important}
+.reader-pane-head h2{font-size:14px!important}
+.reader-pane-head p{font-size:11px!important}
+.inspector-tab{font-size:12px!important}
+.inspector-section h3{font-size:13px!important}
+.review-card p{font-size:13px!important}
+.frame-card-copy h3{font-size:13px!important}
+.asset-copy strong{font-size:13px!important}
+
+/* Preserve responsive layout after widening the desktop outline. */
+@media(max-width:1050px){
+  .hl-proof-grid{grid-template-columns:280px minmax(0,1fr)!important}
+  .hl-proof-center{padding:18px 20px!important}
+}
+@media(max-width:720px){
+  body{font-size:15px!important}
+  .hl-proof-grid{display:block!important}
+  .hl-proof-center{padding:12px!important}
+  .hl-proof-editor{font-size:calc(19px * var(--hl-proof-text-scale,1))!important}
+  .hl-proof-context{font-size:14px!important}
+  .hl-proof-title{min-width:170px!important}
+  .hl-proof-reader-nav .button{font-size:13px!important}
+}

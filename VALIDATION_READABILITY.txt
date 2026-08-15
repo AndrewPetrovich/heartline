@@ -1,0 +1,52 @@
+Local readability contract validation
+====================================
+Base commit: b2aa3743c64f7bc6b219604bc28f9b5a30521fc5
+
+node --test tests/typography-readability.test.js
+------------------------------------------------
+TAP version 13
+# Subtest: proofreading secondary toolbar actions are hidden
+ok 1 - proofreading secondary toolbar actions are hidden
+  ---
+  duration_ms: 1.430359
+  type: 'test'
+  ...
+# Subtest: proofreading outline uses readable type sizes
+ok 2 - proofreading outline uses readable type sizes
+  ---
+  duration_ms: 3.005421
+  type: 'test'
+  ...
+# Subtest: proofreading editor and context stay larger than chrome
+ok 3 - proofreading editor and context stay larger than chrome
+  ---
+  duration_ms: 0.340205
+  type: 'test'
+  ...
+# Subtest: controls and comment forms are no longer micro text
+ok 4 - controls and comment forms are no longer micro text
+  ---
+  duration_ms: 0.296659
+  type: 'test'
+  ...
+# Subtest: font weight policy remains capped at semibold
+ok 5 - font weight policy remains capped at semibold
+  ---
+  duration_ms: 0.616736
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 229.059697
+
+
+Exit code: 0
+
+Note: this patch changes CSS/UI visibility only. It does not modify Project Core,
+proofreading state, source saving, recovery, revisions or conflict handling.

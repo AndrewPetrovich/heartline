@@ -1,0 +1,18 @@
+{
+  "schema": "heartline-update-v1",
+  "name": "proofreading-readability-patch",
+  "baseCommit": "b2aa3743c64f7bc6b219604bc28f9b5a30521fc5",
+  "mode": "non-destructive-update",
+  "replace": [
+    "heartline-typography.css"
+  ],
+  "add": [
+    "tests/typography-readability.test.js",
+    "APPLY_READABILITY.md",
+    "QA_READABILITY.md",
+    "UPDATE_MANIFEST_READABILITY.json",
+    "SHA256SUMS_READABILITY.txt",
+    "VALIDATION_READABILITY.txt"
+  ],
+  "delete": []
+}
