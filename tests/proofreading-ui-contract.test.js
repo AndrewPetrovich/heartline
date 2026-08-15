@@ -28,5 +28,5 @@ test('global typography is capped at semibold', () => {
 
 test('typography cap is loaded by the application shell', () => {
   assert.match(index, /heartline-typography\.css/);
-  assert.match(index, /3\.5\.2/);
+  assert.match(index, /3\.6/);
 });

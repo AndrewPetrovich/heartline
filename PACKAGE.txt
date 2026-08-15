@@ -1,3 +1,3 @@
-HEARTLINE Editor 3.5.2 — Unified Proofreading typography cleanup
-Non-destructive update for 3.5.1. Max UI font weight: 600 (semibold).
+HEARTLINE Editor 3.6 — Presentation Design System
+UX/UI-only architectural pass over 3.5.2 readability baseline.
 Run: npm run verify-repository && npm test && npm run check

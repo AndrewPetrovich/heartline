@@ -1,0 +1,34 @@
+HEARTLINE 3.6 validation
+=========================
+
+Base commit:
+abea3d4f980dc2328be70a2f5f1c70a021d2fb5e
+
+Local reconstructed regression environment:
+- 3.5.1 Project Core + Proofreading sources
+- 3.5.2 typography cleanup
+- published readability patch
+- 3.6 Design System update
+
+npm test
+--------
+53 tests
+53 pass
+0 fail
+
+npm run check
+-------------
+PASS
+
+Typography/UI simplification policy: PASS
+
+Additional syntax checks:
+- hl-editor/presentation/design-system.js: PASS
+- tools/verify-repository.mjs: PASS
+- tests/design-system.test.js: PASS
+
+Architecture:
+PASS - new logic is Presentation-only
+PASS - no direct IndexedDB/filesystem imports from Design System
+PASS - no projectId/source/recovery/revision semantics changed
+PASS - maximum visual font weight remains 600

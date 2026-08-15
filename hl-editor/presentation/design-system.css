@@ -1,0 +1,161 @@
+/* HEARTLINE Presentation Design System 1.0
+   Visual hierarchy only. No persistence or business rules live here.
+*/
+:root{
+  --hl-ds-accent:#0969da;
+  --hl-ds-accent-hover:#0759b8;
+  --hl-ds-accent-soft:#eef7ff;
+  --hl-ds-accent-line:#b6d7ff;
+  --hl-ds-success:#1f7a4d;
+  --hl-ds-success-soft:#eefbf4;
+  --hl-ds-success-line:#b8e2c9;
+  --hl-ds-warning:#8a5200;
+  --hl-ds-warning-soft:#fff8e8;
+  --hl-ds-warning-line:#efd39a;
+  --hl-ds-danger:#a53232;
+  --hl-ds-danger-soft:#fff2f2;
+  --hl-ds-danger-line:#efb8b8;
+  --hl-ds-neutral-soft:#f7f8f9;
+  --hl-ds-neutral-line:#d8dde3;
+  --hl-ds-radius:12px;
+  --hl-ds-shadow:0 8px 24px rgba(24,32,42,.06);
+}
+
+/* Keyboard focus should be obvious without making every control visually loud. */
+:where(button,a,input,select,textarea,summary):focus-visible{
+  outline:3px solid rgba(9,105,218,.22)!important;
+  outline-offset:2px!important;
+}
+
+/* Reusable information hierarchy. */
+.hl-action-callout{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:22px;
+  padding:16px 18px;
+  margin:0 0 18px;
+  border:1px solid var(--hl-ds-accent-line);
+  border-radius:var(--hl-ds-radius);
+  background:var(--hl-ds-accent-soft);
+  box-shadow:0 1px 0 rgba(9,105,218,.03);
+}
+.hl-action-callout-copy{min-width:0;display:grid;gap:4px}
+.hl-action-callout-eyebrow{font-size:11px;line-height:1.3;color:#52606d;text-transform:uppercase;letter-spacing:.08em}
+.hl-action-callout-title{font-size:15px;line-height:1.35;color:#17202a}
+.hl-action-callout-body{font-size:13px;line-height:1.5;color:#4a5561;margin:0;max-width:780px}
+.hl-action-callout-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex:none}
+.hl-action-callout-button{min-height:38px;border-radius:8px;padding:0 13px;border:1px solid transparent;font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.hl-action-callout-button.primary{background:var(--hl-ds-accent);border-color:var(--hl-ds-accent);color:#fff}
+.hl-action-callout-button.primary:hover{background:var(--hl-ds-accent-hover);border-color:var(--hl-ds-accent-hover)}
+.hl-action-callout-button.secondary{background:#fff;border-color:var(--hl-ds-accent-line);color:#24313d}
+.hl-action-callout[data-tone="success"],.hl-action-callout.hl-callout-success{background:var(--hl-ds-success-soft);border-color:var(--hl-ds-success-line)}
+.hl-action-callout[data-tone="warning"],.hl-action-callout.hl-callout-warning{background:var(--hl-ds-warning-soft);border-color:var(--hl-ds-warning-line)}
+.hl-action-callout[data-tone="danger"]{background:var(--hl-ds-danger-soft);border-color:var(--hl-ds-danger-line)}
+.hl-inline-notice{border-radius:10px!important;border-color:var(--hl-ds-neutral-line)!important;background:var(--hl-ds-neutral-soft)!important;box-shadow:none!important}
+
+/* Disclosure replaces permanently visible secondary controls. */
+.hl-ds-disclosure{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.hl-ds-disclosure>summary{cursor:pointer;padding:10px 12px;font-size:13px;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.hl-ds-disclosure>summary::-webkit-details-marker{display:none}
+.hl-ds-disclosure>summary::after{content:'⌄';color:var(--muted);transition:transform .15s ease}
+.hl-ds-disclosure[open]>summary::after{transform:rotate(180deg)}
+.hl-ds-disclosure-body{padding:0 12px 12px;border-top:1px solid var(--line)}
+.hl-ds-original-action{display:none!important}
+
+/* Top bar: quieter utility actions, clearer navigation. */
+.topbar{box-shadow:0 1px 0 rgba(0,0,0,.02)}
+.main-nav{gap:4px}
+.nav-button{transition:background .14s ease,color .14s ease}
+.nav-button.active{background:#eceeeb}
+.topbar-actions{gap:5px}
+#installButton.hl-ds-install-action{background:transparent;border-color:var(--line);color:var(--muted)}
+
+/* Library becomes a workbench rather than an analytics dashboard. */
+.library-page .page-header{margin-bottom:18px}
+.library-page .library-toolbar{margin-bottom:14px}
+.library-page .library-sync-note{margin-bottom:18px}
+.rich-project-list{gap:18px!important}
+.project-card-rich{box-shadow:none!important;transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
+.project-card-rich:hover{border-color:#c8ced4!important;box-shadow:var(--hl-ds-shadow)!important;transform:translateY(-1px)}
+.project-version-row .project-version{display:none!important}
+.project-version-row{justify-content:flex-end!important}
+.project-card-rich-foot .button.secondary{background:#fff}
+.project-production-row{background:#fafbfb;border-radius:10px;padding:10px 12px}
+.hl-project-details{margin-top:2px;border-color:#e2e5e8}
+.hl-project-details .project-stats-grid{margin-top:12px}
+.hl-library-next-action{margin-top:2px}
+
+/* Proofreading: contextual onboarding replaces an empty white panel. */
+.hl-proof-review-onboarding{margin:0 0 14px;padding:14px}
+.hl-proof-review-onboarding .hl-action-callout-actions{align-self:flex-end}
+.hl-ds-callout-replaced,.hl-ds-empty-replaced{display:none!important}
+
+/* Storyboard: keep cards readable, show actions only when user engages a card. */
+.frame-card.hl-ds-hover-card{transition:border-color .15s ease,box-shadow .15s ease,transform .15s ease}
+.frame-card.hl-ds-hover-card:hover,.frame-card.hl-ds-hover-card:focus-within,.frame-card.hl-ds-hover-card:focus{border-color:#c8ced4;box-shadow:var(--hl-ds-shadow);transform:translateY(-1px)}
+.frame-card.hl-ds-hover-card .frame-card-actions{opacity:0;transform:translateY(3px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
+.frame-card.hl-ds-hover-card:hover .frame-card-actions,.frame-card.hl-ds-hover-card:focus-within .frame-card-actions,.frame-card.hl-ds-hover-card:focus .frame-card-actions{opacity:1;transform:none;pointer-events:auto}
+.hl-storyboard-next-action{margin-bottom:16px}
+
+/* Review queue: batch work is secondary, one-item flow is primary. */
+.hl-review-bulk{margin:0 0 14px}
+.hl-review-bulk .bulk-review-bar{margin:12px 0 0}
+.review-queue-card{box-shadow:none!important}
+.hl-review-next-action{margin-bottom:14px}
+
+/* Graph: progressive disclosure keeps visualization chrome quiet. */
+.graph21-toolbar{gap:9px!important;align-items:center}
+.graph21-toolbar #graphSearch{flex:1;min-width:220px;max-width:560px}
+.hl-graph-settings{flex:none;min-width:150px}
+.hl-graph-settings>.hl-ds-disclosure-body{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:min(720px,72vw);padding-top:10px;position:absolute;z-index:70;margin-top:6px;background:#fff;box-shadow:0 14px 36px rgba(0,0,0,.12);border:1px solid var(--line);border-radius:10px;right:0}
+.hl-graph-settings{position:relative;overflow:visible}
+.hl-graph-settings>summary{min-height:38px}
+.graph21-integrity.hl-inline-notice{margin-left:12px;margin-right:12px}
+.graph21-inspector-actions #graphReader{background:var(--hl-ds-accent)!important;border-color:var(--hl-ds-accent)!important;color:#fff!important}
+
+/* Export: three main choices first; preflight is the single status callout. */
+.preflight-card.hl-action-callout{display:flex!important;margin:0 0 16px!important;box-shadow:none!important}
+.export-grid{gap:14px!important}
+.hl-ds-export-card{box-shadow:none!important;display:flex;flex-direction:column;gap:10px}
+.hl-ds-export-card p{margin:0;color:var(--muted);line-height:1.55}
+.hl-ds-export-card h2{margin:0}
+.hl-export-metrics{margin:0 0 16px}
+.hl-export-metrics .metric-grid{margin:12px 0 0}
+.hl-export-extra{margin-top:16px}
+.hl-export-extra-grid{margin-top:12px}
+.hl-ds-source-card-hidden{display:none!important}
+.hl-ds-source-meta{display:grid;grid-template-columns:1fr auto;gap:2px 12px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid rgba(0,0,0,.08);width:100%}
+.hl-ds-source-meta>span{font-size:13px}
+.hl-ds-source-meta>small{grid-column:1;font-size:11px;color:var(--muted)}
+.hl-ds-source-meta>button{grid-row:1/3;grid-column:2}
+
+/* Versions: human-readable history, technical lineage stays hidden unless debugging. */
+.version-card{box-shadow:none!important}
+.version-card .muted{line-height:1.45}
+
+/* Existing cards and modals share one visual language. */
+.card{box-shadow:none}
+.modal-card{box-shadow:0 24px 70px rgba(18,24,31,.18)}
+.empty-state{background:#fafbfb}
+.toast{box-shadow:0 10px 28px rgba(0,0,0,.14)}
+
+@media(max-width:1050px){
+  .hl-action-callout{align-items:flex-start}
+  .hl-graph-settings>.hl-ds-disclosure-body{right:auto;left:0;min-width:min(650px,80vw)}
+}
+@media(max-width:720px){
+  .hl-action-callout{display:grid;gap:12px;padding:14px}
+  .hl-action-callout-actions{justify-content:flex-start;width:100%}
+  .hl-action-callout-button{width:100%}
+  .hl-graph-settings>.hl-ds-disclosure-body{position:fixed;left:10px;right:10px;top:110px;min-width:0;max-height:60dvh;overflow:auto}
+  .frame-card.hl-ds-hover-card .frame-card-actions{opacity:1;transform:none;pointer-events:auto}
+  .hl-ds-source-meta{grid-template-columns:1fr}
+  .hl-ds-source-meta>small,.hl-ds-source-meta>button{grid-column:1;grid-row:auto}
+}
+@media(prefers-reduced-motion:reduce){
+  *{scroll-behavior:auto!important;transition:none!important}
+}
+.hl-ds-context-hidden{display:none!important}
+.preflight-card.hl-action-callout{flex-wrap:wrap!important}
+.preflight-card.hl-action-callout>div:first-child{flex:1;min-width:280px}
