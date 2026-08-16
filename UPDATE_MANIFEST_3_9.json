@@ -1,0 +1,47 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.9.0",
+  "baseCommit": "9d86d9fc072219d5f62b5c564d13d5d982d3e2ee",
+  "mode": "non-destructive-update-with-migration",
+  "migration": "node tools/apply-editorial-pipeline-3.9.mjs",
+  "add": [
+    "hl-editor/editorial/domain/editorial-workflow.js",
+    "hl-editor/editorial/application/editorial-workflow-service.js",
+    "hl-editor/editorial/ports/editorial-workflow-repository.js",
+    "hl-editor/editorial/ports/visual-asset-gateway.js",
+    "hl-editor/editorial/infrastructure/browser-editorial-workflow-repository.js",
+    "hl-editor/editorial/infrastructure/browser-visual-asset-gateway.js",
+    "hl-editor/editorial/presentation/editorial-workspace.js",
+    "hl-editor/editorial/presentation/editorial-workspace.css",
+    "tools/apply-editorial-pipeline-3.9.mjs",
+    "tools/editorial-pipeline-3.9/proofreading-ui-contract.test.js",
+    "tools/verify-editorial-architecture.mjs",
+    "tests/editorial-workflow-domain.test.js",
+    "tests/editorial-workflow-service.test.js",
+    "tests/editorial-architecture.test.js",
+    "APPLY_3_9.md",
+    "ARCHITECTURE_EDITORIAL_3_9.md",
+    "QA_EDITORIAL_3_9.md",
+    "VALIDATION_3_9.txt",
+    "README_v390.txt",
+    "UPDATE_MANIFEST_3_9.json",
+    "SHA256SUMS_3_9.txt"
+  ],
+  "migrationModifies": [
+    "heartline-app.js",
+    "hl-editor/bootstrap/composition-root.js",
+    "hl-editor/index.js",
+    "index.html",
+    "sw.js",
+    "tools/verify-repository.mjs",
+    "package.json",
+    "tests/proofreading-ui-contract.test.js"
+  ],
+  "migrationDeletes": [
+    "tests/library-card-cleanup.test.js",
+    "tests/library-readiness-restore.test.js"
+  ],
+  "stagingFiles": [
+    "tools/editorial-pipeline-3.9/proofreading-ui-contract.test.js"
+  ]
+}

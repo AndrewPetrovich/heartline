@@ -119,6 +119,17 @@ function setActiveNav(route) {
 }
 
 async function setRoute(route) {
+  if ((route === 'reader' || route === 'preview') && window.HEARTLINEEditorialWorkspace?.open) {
+    if (route !== 'preview') state.previewDraftAssignment = null;
+    state.route = route;
+    await window.HEARTLINEEditorialWorkspace.open({
+      stage: route === 'preview' ? 'final' : 'text',
+      fragmentId: state.selectedFragmentId
+    });
+    if (state.project && route !== 'library') await rememberProjectLocation(route);
+    view.focus({ preventScroll: true });
+    return;
+  }
   if (route !== 'preview') state.previewDraftAssignment = null;
   state.route = route;
   document.body.classList.toggle('reader-active', route === 'reader');

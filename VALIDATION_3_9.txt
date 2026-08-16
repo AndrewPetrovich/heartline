@@ -1,0 +1,56 @@
+HEARTLINE 3.9 validation
+=========================
+
+Base:
+HEARTLINE 3.8 / commit 9d86d9fc072219d5f62b5c564d13d5d982d3e2ee
+
+New module syntax
+-----------------
+All JS/MJS files included in this update: PASS
+Temporary proofreading test stub is not included in the package.
+
+Pure Editorial Domain/Application tests
+----------------------------------------
+7 tests
+7 pass
+0 fail
+
+Covered:
+- final review binds current text and visual hashes;
+- text change invalidates final review;
+- visual/crop change invalidates final review;
+- missing image/open issues/Preview errors block final completion;
+- final stage can re-confirm a clean current text;
+- visual progress comes from real workspace assignments;
+- three editorial stage percentages are independent.
+
+Migration fixture
+-----------------
+LF fixture: PASS
+CRLF fixture: PASS
+2 obsolete tests targeting the already-removed Library DOM-patch modules are removed by migration.
+The existing proofreading UI contract test is replaced only by the migration after validation.
+
+Architecture fixture
+--------------------
+Editorial workflow architecture: PASS
+- Presentation has no direct DB/Infrastructure dependency;
+- Application uses ports and existing application services;
+- no additional MutationObserver is introduced;
+- final state stores textHash + visualHash;
+- standalone legacy Proofreading Presentation is removed from the composition entry;
+- Reader/Preview legacy routes delegate into the unified Editorial Workspace.
+
+Readability
+-----------
+New Editorial Workspace CSS uses no font size below 11px and no font weight above 600.
+The side panel remains usable on narrow/mobile layouts instead of disappearing.
+
+Release note
+------------
+This package does not contain a complete repository checkout.
+Run the full repository release gate after applying the migration:
+
+npm.cmd run verify-repository
+npm.cmd test
+npm.cmd run check

@@ -16,8 +16,11 @@ import { BrowserSampleCatalogRepository } from '../infrastructure/browser-sample
 import { SampleCatalogService } from '../application/sample-catalog-service.js';
 import { DeviceProfileService } from '../preview/application/device-profile-service.js';
 import { BUILTIN_DEVICE_PROFILE_CATALOG, BUILTIN_DEVICE_COMPARISON_PRESETS, DEFAULT_PREVIEW_DEVICE_ID } from '../preview/infrastructure/builtin-device-profile-catalog.js';
+import { EditorialWorkflowService } from '../editorial/application/editorial-workflow-service.js';
+import { BrowserEditorialWorkflowRepository } from '../editorial/infrastructure/browser-editorial-workflow-repository.js';
+import { BrowserVisualAssetGateway } from '../editorial/infrastructure/browser-visual-asset-gateway.js';
 import { setAppServices } from '../application/service-container.js';
-import { configureNovelParser } from '../../heartline-domain.js';
+import { configureNovelParser, frameDiagnostics, visualForDevice } from '../../heartline-domain.js';
 import { configureDbAdapters } from '../../heartline-db.js';
 
 const parser = window.HEARTLINEParser;
@@ -65,6 +68,20 @@ const deviceProfileService = new DeviceProfileService(BUILTIN_DEVICE_PROFILE_CAT
   maxComparisonDevices: 4
 });
 
+const editorialWorkflowRepository = new BrowserEditorialWorkflowRepository();
+const visualAssetGateway = new BrowserVisualAssetGateway();
+const editorialWorkflowService = new EditorialWorkflowService({
+  repository: editorialWorkflowRepository,
+  proofreadingService,
+  visualGateway: visualAssetGateway,
+  deviceProfileService,
+  diagnoseFrame(frame, device) {
+    const visual = visualForDevice(frame?.assignment, device.id);
+    return frameDiagnostics(frame, device, visual, 1);
+  },
+  clock: () => new Date().toISOString()
+});
+
 export const appServices = Object.freeze({
   policies,
   contextRepository,
@@ -75,7 +92,10 @@ export const appServices = Object.freeze({
   proofreadingService,
   storyProfileRegistry,
   sampleCatalogService,
-  deviceProfileService
+  deviceProfileService,
+  editorialWorkflowRepository,
+  visualAssetGateway,
+  editorialWorkflowService
 });
 
 setAppServices(appServices);
