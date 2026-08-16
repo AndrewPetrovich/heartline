@@ -25,6 +25,7 @@ let previewDeviceId = deviceProfileService.defaultProfile().id;
 let previewOrientation = 'portrait';
 let previewShowSafeArea = false;
 let previewCompare = false;
+let previewRenderGeneration = 0;
 
 function installStyles() {
   if (document.getElementById(STYLE_ID)) return;
@@ -157,13 +158,30 @@ function previewToolbarHtml() {
 }
 
 function visualCenterHtml(unit) {
-  return `<section class="hl-editorial-preview-center">
+  const finalEditor = stage === 'final' && finalEditOpen
+    ? `<div class="hl-editorial-final-center-edit">
+        <div class="hl-editorial-final-center-head"><strong>Редактирование текста</strong><span>Изменение текста автоматически сбросит актуальность финальной проверки.</span></div>
+        <textarea id="hlEditorialFinalEditor" spellcheck="true">${esc(unit.text)}</textarea>
+        <div class="hl-editorial-final-center-actions">
+          <button id="hlEditorialCancelFinalText" type="button" class="button secondary">Отмена</button>
+          <button id="hlEditorialSaveFinalText" type="button" class="button primary">Сохранить текст</button>
+        </div>
+      </div>`
+    : '';
+  const caption = stage === 'final'
+    ? `<button id="hlEditorialEditCaption" type="button" class="hl-editorial-preview-caption editable" title="Редактировать текст">
+        <strong>${esc(unit.speaker || unit.type)}</strong>
+        <span>${esc(unit.text)}</span>
+        <em>Редактировать</em>
+      </button>`
+    : `<div class="hl-editorial-preview-caption">
+        <strong>${esc(unit.speaker || unit.type)}</strong>
+        <span>${esc(unit.text)}</span>
+      </div>`;
+  return `<section class="hl-editorial-preview-center ${finalEditOpen ? 'editing-text' : ''}">
     ${previewToolbarHtml()}
-    <div id="hlEditorialPreviewCanvas" class="hl-editorial-preview-canvas"></div>
-    <div class="hl-editorial-preview-caption">
-      <strong>${esc(unit.speaker || unit.type)}</strong>
-      <span>${esc(unit.text)}</span>
-    </div>
+    <div id="hlEditorialPreviewCanvas" class="hl-editorial-preview-canvas" aria-live="polite"></div>
+    ${finalEditor || caption}
   </section>`;
 }
 
@@ -222,7 +240,6 @@ function finalPanelHtml(unit) {
       <button id="hlEditorialEditFinalText" class="button secondary">${finalEditOpen ? 'Закрыть редактор' : 'Редактировать текст'}</button>
       <button id="hlEditorialFinalReview" class="button secondary">+ Замечание</button>
     </div>
-    ${finalEditOpen ? `<div class="hl-editorial-final-edit"><textarea id="hlEditorialFinalEditor">${esc(unit.text)}</textarea><button id="hlEditorialSaveFinalText" class="button primary">Сохранить текст</button></div>` : ''}
     ${unit.diagnostics.flatMap(item => item.warnings.map(warning => ({ ...warning, device: item.device.label }))).slice(0, 6).map(warning => `<div class="hl-editorial-diagnostic" data-level="${esc(warning.level)}"><strong>${esc(warning.device)}</strong><span>${esc(warning.text)}</span></div>`).join('')}
   </section>
   ${visualPanelHtml(unit, { final: true })}
@@ -236,6 +253,7 @@ function sidePanelHtml(unit) {
 }
 
 function renderWorkspace() {
+  previewRenderGeneration += 1;
   const unit = currentUnit();
   const view = $('view');
   if (!view) return;
@@ -284,6 +302,7 @@ async function reload({ keepSelection = true } = {}) {
 async function selectUnit(fragmentId) {
   const unit = model.units.find(item => item.fragmentId === fragmentId);
   if (!unit) return;
+  if (fragmentId !== selectedFragmentId) await flushPendingFinalText();
   selectedFragmentId = fragmentId;
   await workflowService.setSelection(model.project.projectId, unit);
   reviewFormOpen = false;
@@ -305,6 +324,7 @@ async function flushPendingText() {
 async function changeStage(nextStage) {
   if (!['text', 'visual', 'final'].includes(nextStage) || nextStage === stage) return;
   await flushPendingText();
+  await flushPendingFinalText();
   stage = nextStage;
   reviewFormOpen = false;
   finalEditOpen = false;
@@ -325,6 +345,57 @@ async function saveFinalText(value) {
   await workflowService.saveText(model.project.projectId, unit.fragmentId, value, 'editorial-final-edit');
   finalEditOpen = false;
   await reload();
+}
+
+async function flushPendingFinalText() {
+  if (stage !== 'final' || !finalEditOpen) return;
+  clearTimeout(editorTimer);
+  const editor = $('hlEditorialFinalEditor');
+  const unit = currentUnit();
+  if (!editor || !unit || editor.value === unit.text) return;
+  await workflowService.saveText(model.project.projectId, unit.fragmentId, editor.value, 'editorial-final-navigation');
+  model = await workflowService.load(model.project.projectId);
+}
+
+async function persistFinalTextDraft() {
+  const editor = $('hlEditorialFinalEditor');
+  const unit = currentUnit();
+  if (!editor || !unit || editor.value === unit.text) return { changed: false };
+  const value = editor.value;
+  const fragmentId = unit.fragmentId;
+  const result = await workflowService.saveText(model.project.projectId, fragmentId, value, 'editorial-final-autosave');
+  const current = model?.units?.find(item => item.fragmentId === fragmentId);
+  if (current && current.fragmentId === selectedFragmentId) {
+    current.text = value;
+    current.textReady = false;
+    current.textStatus = 'changed';
+    current.finalReady = false;
+    current.finalStatus = 'changed';
+  }
+  return result;
+}
+
+function scheduleFinalTextDraftSave() {
+  clearTimeout(editorTimer);
+  editorTimer = setTimeout(() => {
+    persistFinalTextDraft().catch(error => toast(error.message || error, 'error'));
+  }, autosaveDelayMs);
+}
+
+function openFinalEditor() {
+  if (stage !== 'final') return;
+  finalEditOpen = true;
+  renderWorkspace();
+  requestAnimationFrame(() => {
+    const editor = $('hlEditorialFinalEditor');
+    editor?.focus();
+    if (editor) editor.setSelectionRange(editor.value.length, editor.value.length);
+  });
+}
+
+function closeFinalEditor() {
+  finalEditOpen = false;
+  renderWorkspace();
 }
 
 function scheduleTextSave() {
@@ -374,64 +445,99 @@ async function updateVisual(patch) {
   await reload();
 }
 
+async function nextPaint() {
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+}
+
+function renderPreviewFailure(host, error) {
+  if (!host) return;
+  const message = String(error?.message || error || 'Не удалось отрисовать Preview');
+  host.innerHTML = `<div class="hl-editorial-preview-error" role="alert">
+    <strong>Preview временно недоступен</strong>
+    <span>${esc(message)}</span>
+    <button id="hlEditorialRetryPreview" type="button" class="button secondary small">Повторить</button>
+  </div>`;
+  $('hlEditorialRetryPreview')?.addEventListener('click', () => renderPreview().catch(() => {}));
+}
+
 async function renderPreview() {
+  const generation = ++previewRenderGeneration;
   const unit = currentUnit();
   const host = $('hlEditorialPreviewCanvas');
   if (!unit || !host) return;
-  const assetUrl = await workflowService.assetObjectUrl(unit.assetId);
-  const frame = {
-    fragmentId: unit.fragmentId,
-    sceneId: unit.sceneId,
-    sceneTitle: unit.sceneTitle,
-    type: unit.type,
-    speaker: unit.speaker,
-    text: unit.text,
-    options: unit.options || [],
-    visualPrompt: unit.sceneTitle,
-    assignment: unit.assignment,
-    asset: unit.asset
-  };
-  const bounds = host.getBoundingClientRect();
-  const fitBounds = {
-    availableWidth: Math.max(320, bounds.width - 36),
-    availableHeight: Math.max(480, bounds.height - 36),
-    fitFraction: .88,
-    maxScale: 1.2
-  };
 
-  if (stage === 'final' && previewCompare) {
-    const profiles = model.targetProfiles.slice(0, 4);
-    renderDeviceComparison(host, profiles.map(device => ({
-      frame,
-      device,
-      orientation: previewOrientation,
-      assetUrl,
-      textScale: 1,
-      panelStyle: 'glass',
-      fitBounds: { ...fitBounds, fitFraction: .62, maxScale: .72 },
-      showSafeArea: previewShowSafeArea
-    })));
-    return;
+  host.dataset.renderState = 'loading';
+  await nextPaint();
+  if (generation !== previewRenderGeneration || !host.isConnected || currentUnit()?.fragmentId !== unit.fragmentId) return;
+
+  try {
+    const assetUrl = unit.assetId ? await workflowService.assetObjectUrl(unit.assetId) : null;
+    if (generation !== previewRenderGeneration || !host.isConnected || currentUnit()?.fragmentId !== unit.fragmentId) return;
+
+    const frame = {
+      fragmentId: unit.fragmentId,
+      sceneId: unit.sceneId,
+      sceneTitle: unit.sceneTitle,
+      type: unit.type,
+      speaker: unit.speaker,
+      text: unit.text,
+      options: unit.options || [],
+      visualPrompt: unit.sceneTitle,
+      assignment: unit.assignment,
+      asset: unit.asset
+    };
+
+    const bounds = host.getBoundingClientRect();
+    const center = host.closest('.hl-editorial-center')?.getBoundingClientRect();
+    const fitBounds = {
+      availableWidth: Math.max(320, bounds.width || center?.width || 720),
+      availableHeight: Math.max(480, bounds.height || center?.height || 720),
+      fitFraction: .88,
+      maxScale: 1.2
+    };
+
+    if (stage === 'final' && previewCompare) {
+      const profiles = model.targetProfiles.slice(0, 4);
+      renderDeviceComparison(host, profiles.map(device => ({
+        frame,
+        device,
+        orientation: previewOrientation,
+        assetUrl,
+        textScale: 1,
+        panelStyle: 'glass',
+        fitBounds: { ...fitBounds, fitFraction: .62, maxScale: .72 },
+        showSafeArea: previewShowSafeArea
+      })));
+    } else {
+      const device = deviceProfileService.resolve(previewDeviceId) || deviceProfileService.defaultProfile();
+      renderPlayerFrame(host, {
+        frame,
+        device,
+        orientation: previewOrientation,
+        assetUrl,
+        textScale: 1,
+        panelStyle: 'glass',
+        fitBounds,
+        showSafeArea: previewShowSafeArea,
+        showFocalPoint: stage === 'visual' && unit.visualReady,
+        onFocalPointChange: stage === 'visual' && unit.visualReady
+          ? (point, meta) => { if (meta.commit) updateVisual({ focalPoint: point, status: unit.assignment?.status === 'approved' ? 'needs-review' : (unit.assignment?.status || 'draft') }).catch(error => toast(error.message || error, 'error')); }
+          : null,
+        onZoomChange: stage === 'visual' && unit.visualReady
+          ? (zoom, meta) => { if (meta.commit) updateVisual({ zoom, status: unit.assignment?.status === 'approved' ? 'needs-review' : (unit.assignment?.status || 'draft') }).catch(error => toast(error.message || error, 'error')); }
+          : null
+      });
+    }
+
+    if (!host.querySelector('.player-device')) throw new Error('Renderer не создал устройство Preview');
+    host.dataset.renderState = unit.assetId ? 'ready' : 'placeholder';
+  } catch (error) {
+    console.error('[HEARTLINE:editorial-preview]', error);
+    if (generation === previewRenderGeneration) {
+      host.dataset.renderState = 'error';
+      renderPreviewFailure(host, error);
+    }
   }
-
-  const device = deviceProfileService.resolve(previewDeviceId);
-  renderPlayerFrame(host, {
-    frame,
-    device,
-    orientation: previewOrientation,
-    assetUrl,
-    textScale: 1,
-    panelStyle: 'glass',
-    fitBounds,
-    showSafeArea: previewShowSafeArea,
-    showFocalPoint: stage === 'visual' && unit.visualReady,
-    onFocalPointChange: stage === 'visual' && unit.visualReady
-      ? (point, meta) => { if (meta.commit) updateVisual({ focalPoint: point, status: unit.assignment?.status === 'approved' ? 'needs-review' : (unit.assignment?.status || 'draft') }).catch(error => toast(error.message || error, 'error')); }
-      : null,
-    onZoomChange: stage === 'visual' && unit.visualReady
-      ? (zoom, meta) => { if (meta.commit) updateVisual({ zoom, status: unit.assignment?.status === 'approved' ? 'needs-review' : (unit.assignment?.status || 'draft') }).catch(error => toast(error.message || error, 'error')); }
-      : null
-  });
 }
 
 async function move(delta, { mark = false } = {}) {
@@ -439,6 +545,9 @@ async function move(delta, { mark = false } = {}) {
   if (!current) return;
   if (stage === 'text') {
     await flushPendingText();
+    current = currentUnit() || current;
+  } else if (stage === 'final') {
+    await flushPendingFinalText();
     current = currentUnit() || current;
   }
   if (mark && stage === 'text') {
@@ -504,10 +613,23 @@ function bindWorkspace() {
     status: currentUnit().assignment?.status === 'approved' ? 'needs-review' : (currentUnit().assignment?.status || 'draft')
   }).catch(error => toast(error.message || error, 'error'));
 
-  $('hlEditorialEditFinalText')?.addEventListener('click', () => { finalEditOpen = !finalEditOpen; renderWorkspace(); });
+  $('hlEditorialEditFinalText')?.addEventListener('click', () => {
+    if (finalEditOpen) closeFinalEditor();
+    else openFinalEditor();
+  });
+  $('hlEditorialEditCaption')?.addEventListener('click', openFinalEditor);
+  $('hlEditorialCancelFinalText')?.addEventListener('click', closeFinalEditor);
   $('hlEditorialSaveFinalText')?.addEventListener('click', () => {
     saveFinalText($('hlEditorialFinalEditor').value)
       .catch(error => toast(error.message || error, 'error'));
+  });
+  $('hlEditorialFinalEditor')?.addEventListener('input', scheduleFinalTextDraftSave);
+  $('hlEditorialFinalEditor')?.addEventListener('keydown', event => {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      $('hlEditorialSaveFinalText')?.click();
+    }
+    if (event.key === 'Escape') closeFinalEditor();
   });
 
   const device = $('hlEditorialDevice');
@@ -599,6 +721,13 @@ export async function open({ stage: requestedStage = null, fragmentId = null } =
 
 export function leave() {
   if (!active) return;
+  const pendingFinalEditor = $('hlEditorialFinalEditor');
+  const pendingFinalUnit = currentUnit();
+  if (stage === 'final' && finalEditOpen && pendingFinalEditor && pendingFinalUnit && pendingFinalEditor.value !== pendingFinalUnit.text) {
+    clearTimeout(editorTimer);
+    workflowService.saveText(model.project.projectId, pendingFinalUnit.fragmentId, pendingFinalEditor.value, 'editorial-final-leave')
+      .catch(error => console.error('[HEARTLINE:editorial-final-leave]', error));
+  }
   active = false;
   clearTimeout(editorTimer);
   document.body.classList.remove('hl-editorial-active', 'hl-proofreading-active');

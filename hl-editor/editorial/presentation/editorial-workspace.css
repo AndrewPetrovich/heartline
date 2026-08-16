@@ -151,3 +151,112 @@
   .hl-editorial-footer .button{min-width:0;padding:0 9px;font-size:11px}
   .hl-editorial-text-editor{font-size:18px}
 }
+
+
+/* HEARTLINE 3.9.1 — final Preview regression fix */
+.hl-editorial-preview-caption.editable{
+  width:min(760px,100%);
+  display:grid;
+  grid-template-columns:auto minmax(0,1fr) auto;
+  align-items:center;
+  gap:10px;
+  border:1px solid transparent;
+  cursor:text;
+  text-align:left;
+  font:inherit;
+  color:inherit;
+}
+.hl-editorial-preview-caption.editable:hover,
+.hl-editorial-preview-caption.editable:focus-visible{
+  border-color:#a9c9ef;
+  background:#f5f9ff;
+  outline:0;
+}
+.hl-editorial-preview-caption.editable em{
+  color:#1769c2;
+  font-size:11px;
+  font-style:normal;
+  white-space:nowrap;
+}
+.hl-editorial-final-center-edit{
+  width:min(760px,100%);
+  margin:0 auto;
+  display:grid;
+  gap:9px;
+  padding:12px;
+  border:1px solid #b9cce2;
+  border-radius:12px;
+  background:#fff;
+  box-shadow:0 8px 26px rgba(0,0,0,.06);
+}
+.hl-editorial-final-center-head{display:grid;gap:2px}
+.hl-editorial-final-center-head strong{font-size:13px}
+.hl-editorial-final-center-head span{font-size:11px;color:var(--muted)}
+.hl-editorial-final-center-edit textarea{
+  width:100%;
+  min-height:118px;
+  resize:vertical;
+  border:1px solid var(--line);
+  border-radius:9px;
+  padding:10px 11px;
+  background:#fff;
+  font:inherit;
+  font-size:16px;
+  line-height:1.55;
+}
+.hl-editorial-final-center-edit textarea:focus{
+  outline:0;
+  border-color:#8bb7ea;
+  box-shadow:0 0 0 3px rgba(20,115,230,.08);
+}
+.hl-editorial-final-center-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:7px;
+}
+.hl-editorial-preview-error{
+  width:min(440px,calc(100% - 24px));
+  display:grid;
+  justify-items:start;
+  gap:8px;
+  padding:16px;
+  border:1px solid #e2b4b4;
+  border-radius:12px;
+  background:#fff6f6;
+  color:#7d2929;
+}
+.hl-editorial-preview-error strong{font-size:14px}
+.hl-editorial-preview-error span{font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.hl-editorial-preview-canvas[data-render-state=loading]::before{
+  content:"Загрузка Preview…";
+  color:var(--muted);
+  font-size:12px;
+}
+.hl-editorial-preview-canvas[data-render-state=loading]:has(.player-device)::before{display:none}
+
+/* Toasts must not cover the current frame text / caption. */
+.hl-editorial-toast{
+  left:auto!important;
+  right:18px!important;
+  top:calc(var(--header-h) + 76px)!important;
+  bottom:auto!important;
+  max-width:min(420px,calc(100vw - 36px));
+  transform:translateY(-10px)!important;
+}
+.hl-editorial-toast.visible{transform:translateY(0)!important}
+
+@media(max-width:700px){
+  .hl-editorial-preview-caption.editable{
+    grid-template-columns:1fr auto;
+  }
+  .hl-editorial-preview-caption.editable strong{grid-column:1}
+  .hl-editorial-preview-caption.editable span{grid-column:1}
+  .hl-editorial-preview-caption.editable em{grid-column:2;grid-row:1/3}
+  .hl-editorial-final-center-edit textarea{font-size:16px}
+  .hl-editorial-toast{
+    top:68px!important;
+    right:10px!important;
+    left:10px!important;
+    max-width:none;
+  }
+}

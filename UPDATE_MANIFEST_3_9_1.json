@@ -1,0 +1,27 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.9.1",
+  "baseCommit": "b287a96d133e40176c9ff11ea60d8d93de5ae9a9",
+  "mode": "non-destructive-update-with-staged-replacements",
+  "migration": "node tools/apply-editorial-preview-fix-3.9.1.mjs",
+  "migrationModifies": [
+    "hl-editor/editorial/presentation/editorial-workspace.js",
+    "hl-editor/editorial/presentation/editorial-workspace.css",
+    "package.json",
+    "index.html",
+    "sw.js"
+  ],
+  "add": [
+    "tests/editorial-workspace-regression-3.9.1.test.js",
+    "APPLY_3_9_1.md",
+    "QA_3_9_1.md",
+    "VALIDATION_3_9_1.txt",
+    "UPDATE_MANIFEST_3_9_1.json",
+    "SHA256SUMS_3_9_1.txt",
+    "tools/apply-editorial-preview-fix-3.9.1.mjs"
+  ],
+  "stagingFiles": [
+    "tools/editorial-preview-fix-3.9.1/editorial-workspace.js",
+    "tools/editorial-preview-fix-3.9.1/editorial-workspace.css"
+  ]
+}

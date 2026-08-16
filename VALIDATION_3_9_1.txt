@@ -1,0 +1,28 @@
+HEARTLINE 3.9.1 package validation
+===================================
+
+Base Editorial Workspace SHA-256
+--------------------------------
+editorial-workspace.js  0ab60dae05be6e9552caafec14caf2c566aadd8ba7d6ae6ab4b0a7ced13f6b3a
+editorial-workspace.css 1d891f4ab70261e176c5ed7acfaa0248115573f40537044cd53580f8d8c91d5f
+
+Replacement SHA-256
+-------------------
+editorial-workspace.js  635e7b7465608a6743fa81882e81634767f92805bc8981ed4721a2f57d2532ef
+editorial-workspace.css 5da5bb73f3409710ccb121d022587edd1e25d9d91c389b786c72bb52bff2dbc5
+
+Local regression suite
+----------------------
+7 tests
+7 pass
+0 fail
+
+Syntax
+------
+editorial-workspace.js: PASS
+migration script: PASS
+
+Scope
+-----
+Presentation regression fix only.
+No source-backed Save / projectId / recovery / revision policy change.

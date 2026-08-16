@@ -1,4 +1,4 @@
-const CACHE='heartline-editor-3.9.0-editorial-pipeline';
+const CACHE='heartline-editor-3.9.1-editorial-preview-fix';
 const CORE=[
   './','./index.html','./heartline-app.css','./heartline-typography.css','./hl-editor/preview/presentation/preview-lab.css','./heartline-nav-fix.css','./heartline-reader-cleanup.css','./heartline-library-cards.css','./heartline-reader-hierarchy.css','./heartline-graph2.css',
   './heartline-app.js','./heartline-nav-fix.js','./heartline-project-stats.js','./heartline-graph.js','./heartline-graph-model.js','./heartline-graph-analysis.js','./heartline-graph-layout.js','./heartline-graph-layout-worker.js','./heartline-graph-renderers.js','./heartline-graph-navigation.js',
