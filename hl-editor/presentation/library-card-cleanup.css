@@ -1,4 +1,4 @@
-/* HEARTLINE 3.6.3 — Library card cleanup
+/* HEARTLINE 3.6.4 — Library card cleanup + readiness restore
    Library cards are editorial status cards, not analytics dashboards.
 */
 
@@ -33,4 +33,10 @@
 }
 .library-page .project-card-rich-foot{
   margin-top:14px!important;
+}
+
+
+/* 3.6.4: the proofreading readiness panel is a required first-level Library element. */
+.library-page .hl-project-proofreading{
+  display:block!important;
 }

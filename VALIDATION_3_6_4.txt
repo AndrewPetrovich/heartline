@@ -1,0 +1,65 @@
+HEARTLINE 3.6.4 validation
+===========================
+
+Base commit:
+fd6fa9c400c507ff2adee87a45f330b2c4537f39
+
+node --check library-card-cleanup.js
+------------------------------------
+exit code: 0
+
+
+node --test tests/library-readiness-restore.test.js
+---------------------------------------------------
+TAP version 13
+# Subtest: readiness panel is explicitly restored
+ok 1 - readiness panel is explicitly restored
+  ---
+  duration_ms: 0.613061
+  type: 'test'
+  ...
+# Subtest: readiness uses the existing ProofreadingService model
+ok 2 - readiness uses the existing ProofreadingService model
+  ---
+  duration_ms: 0.829522
+  type: 'test'
+  ...
+# Subtest: restored panel contains the requested editorial metrics
+ok 3 - restored panel contains the requested editorial metrics
+  ---
+  duration_ms: 0.122181
+  type: 'test'
+  ...
+# Subtest: structure and production remain removed
+ok 4 - structure and production remain removed
+  ---
+  duration_ms: 0.093539
+  type: 'test'
+  ...
+# Subtest: readiness insertion is race-safe and non-duplicating
+ok 5 - readiness insertion is race-safe and non-duplicating
+  ---
+  duration_ms: 0.282029
+  type: 'test'
+  ...
+# Subtest: css guarantees readiness panel is visible
+ok 6 - css guarantees readiness panel is visible
+  ---
+  duration_ms: 0.126668
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 50.685032
+
+
+exit code: 0
+
+Scope:
+Presentation-only. Existing ProofreadingService is the source of readiness data.
