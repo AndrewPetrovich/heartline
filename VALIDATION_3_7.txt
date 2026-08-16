@@ -1,0 +1,68 @@
+HEARTLINE 3.7 package validation
+================================
+
+node --check hl-editor/ports/story-format-profile.js: PASS
+node --check hl-editor/application/story-profile-runtime.js: PASS
+node --check hl-editor/application/story-profile-registry.js: PASS
+node --check hl-editor/application/service-container.js: PASS
+node --check hl-editor/infrastructure/story-profiles/generic-story-profile.js: PASS
+node --check hl-editor/infrastructure/story-profiles/legacy-heartline-story-profile.js: PASS
+node --check hl-editor/application/source-adapter-registry.js: PASS
+node --check hl-editor/application/service-container.js: PASS
+node --check hl-editor/ports/sample-catalog-repository.js: PASS
+node --check hl-editor/application/sample-catalog-service.js: PASS
+node --check hl-editor/presentation/presentation-coordinator.js: PASS
+node --check tools/verify-architecture.mjs: PASS
+node --check tools/apply-architecture-consolidation.mjs: PASS
+
+Pure unit tests:
+TAP version 13
+# Subtest: source adapter registry keeps format-specific source rules out of project config
+ok 1 - source adapter registry keeps format-specific source rules out of project config
+  ---
+  duration_ms: 0.923632
+  type: 'test'
+  ...
+# Subtest: legacy story rules are selected by the profile, not generic engine code
+ok 2 - legacy story rules are selected by the profile, not generic engine code
+  ---
+  duration_ms: 0.752918
+  type: 'test'
+  ...
+# Subtest: legacy profile enriches chapter and route metadata
+ok 3 - legacy profile enriches chapter and route metadata
+  ---
+  duration_ms: 0.536156
+  type: 'test'
+  ...
+# Subtest: dynamic route targets are isolated in the legacy profile
+ok 4 - dynamic route targets are isolated in the legacy profile
+  ---
+  duration_ms: 0.661543
+  type: 'test'
+  ...
+# Subtest: legacy route evaluation is data-profile behavior
+ok 5 - legacy route evaluation is data-profile behavior
+  ---
+  duration_ms: 0.186487
+  type: 'test'
+  ...
+# Subtest: generic profile has no novel-specific variables or routes
+ok 6 - generic profile has no novel-specific variables or routes
+  ---
+  duration_ms: 0.131205
+  type: 'test'
+  ...
+1..6
+# tests 6
+# suites 0
+# pass 6
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 53.757156
+
+Exit code: 0
+
+Full architecture-contract tests run after the migration is applied to the complete repository.

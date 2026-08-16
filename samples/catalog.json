@@ -1,0 +1,22 @@
+{
+  "formatVersion": 1,
+  "samples": [
+    {
+      "file": "./novel.json",
+      "stableId": "8b7f5055-5f6f-4fd1-a59a-27d69aca4f1e",
+      "aliases": [
+        "poslednyaya-podacha",
+        "poslednyaya-podacha-heartline-branching2-20260808"
+      ],
+      "sourceType": "builtin-poslednyaya-podacha"
+    },
+    {
+      "file": "./moon-oath.json",
+      "stableId": "9340c538-0df3-4e3d-9274-36f7e9b3dff5",
+      "aliases": [
+        "moon_oath"
+      ],
+      "sourceType": "builtin-moon-oath"
+    }
+  ]
+}
