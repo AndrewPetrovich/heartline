@@ -3,7 +3,8 @@ import * as DB from './hl-editor/application/legacy-editor-gateway.js';
 import * as Domain from './heartline-domain.js';
 import { StoryEngine, createSession } from './heartline-engine.js';
 import * as Assets from './hl-editor/application/asset-application-service.js';
-import { DEVICE_PRESETS, renderPlayerFrame, renderDeviceComparison, orientedDevice } from './heartline-player-renderer.js';
+import { getAppServices } from './hl-editor/application/service-container.js';
+import { renderPlayerFrame, renderDeviceComparison, calculatePreviewScale, orientedDevice } from './heartline-player-renderer.js';
 import { buildGraph, layoutGraph, renderGraph, renderGraphOutline, renderGraphMinimap, enableGraphNavigation, consequenceSet, graphFixtureSummary, presentationStats, clearGraphLayoutCache } from './heartline-graph.js';
 import * as ProjectStats from './heartline-project-stats.js';
 
@@ -12,6 +13,7 @@ const view = $('view');
 const modal = $('modal');
 const exporter = window.HEARTLINEExporter;
 const parser = window.HEARTLINEParser;
+const deviceProfileService = getAppServices().deviceProfileService;
 
 
 const READER_PREFS_KEY = 'heartline-reader-prefs-v1';
@@ -63,9 +65,14 @@ const state = {
   reviewSearch: '',
   reviewSelected: new Set(),
   reviewSearchTimer: null,
-  previewDeviceId: 'iphone390',
+  previewDeviceId: deviceProfileService.defaultProfile().id,
   previewOrientation: 'portrait',
   previewCompare: false,
+  previewCompareDeviceIds: deviceProfileService.comparisonPreset('essential').map(profile => profile.id),
+  previewComparisonPreset: 'essential',
+  previewScaleMode: 'fit',
+  previewShowSafeArea: false,
+  previewCustomDevice: { width: 390, height: 844, safeTop: 0, safeRight: 0, safeBottom: 0, safeLeft: 0, fontSize: 17 },
   previewTextScale: 1,
   previewPanelStyle: 'glass',
   previewDraftAssignment: null,
@@ -1357,55 +1364,289 @@ async function renderAssets() {
   await hydrateImages(view);
 }
 
+function previewDeviceOptionsHtml() {
+  const groups = deviceProfileService.groupedProfiles();
+  return `${groups.map(group => `<optgroup label="${Domain.escapeHtml(group.family)}">${group.profiles.map(device => `<option value="${Domain.escapeHtml(device.id)}" ${device.id === state.previewDeviceId ? 'selected' : ''}>${Domain.escapeHtml(device.label)}</option>`).join('')}</optgroup>`).join('')}<optgroup label="Пользовательский"><option value="custom" ${state.previewDeviceId === 'custom' ? 'selected' : ''}>Пользовательский viewport…</option></optgroup>`;
+}
+
+function currentPreviewDevice() {
+  return deviceProfileService.resolve(state.previewDeviceId, state.previewCustomDevice);
+}
+
+function previewComparePickerHtml() {
+  const selected = new Set(deviceProfileService.normalizeComparison(state.previewCompareDeviceIds));
+  const groups = deviceProfileService.groupedProfiles();
+  return `<div class="preview-compare-presets">
+    <button type="button" class="button secondary small" data-preview-preset="essential" data-active="${state.previewComparisonPreset === 'essential'}">Основные 4</button>
+    <button type="button" class="button secondary small" data-preview-preset="ios" data-active="${state.previewComparisonPreset === 'ios'}">iOS</button>
+    <button type="button" class="button secondary small" data-preview-preset="android" data-active="${state.previewComparisonPreset === 'android'}">Android</button>
+    <button type="button" class="button secondary small" data-preview-preset="edge" data-active="${state.previewComparisonPreset === 'edge'}">Граничные</button>
+  </div>
+  <div class="preview-compare-picker">${groups.flatMap(group => group.profiles.map(device => `<label class="preview-compare-device"><input type="checkbox" data-preview-compare-device="${Domain.escapeHtml(device.id)}" ${selected.has(device.id) ? 'checked' : ''}><span>${Domain.escapeHtml(device.label)}${device.aliases?.length ? `<small>${Domain.escapeHtml(device.aliases[0])}</small>` : ''}</span></label>`)).join('')}</div>
+  <p class="preview-control-note">Выберите до ${deviceProfileService.maxComparisonDevices} профилей. Геометрия устройств хранится в отдельном каталоге, а не в Preview UI.</p>`;
+}
+
+function previewCustomDeviceHtml() {
+  if (state.previewDeviceId !== 'custom') return '';
+  const custom = state.previewCustomDevice;
+  return `<div class="preview-custom-grid">
+    <label class="field"><span>Ширина</span><input id="previewCustomWidth" class="input" type="number" min="240" max="2200" value="${custom.width}"></label>
+    <label class="field"><span>Высота</span><input id="previewCustomHeight" class="input" type="number" min="320" max="2400" value="${custom.height}"></label>
+    <label class="field"><span>Safe top</span><input id="previewCustomSafeTop" class="input" type="number" min="0" max="240" value="${custom.safeTop}"></label>
+    <label class="field"><span>Safe bottom</span><input id="previewCustomSafeBottom" class="input" type="number" min="0" max="240" value="${custom.safeBottom}"></label>
+    <label class="field"><span>Safe left</span><input id="previewCustomSafeLeft" class="input" type="number" min="0" max="240" value="${custom.safeLeft}"></label>
+    <label class="field"><span>Safe right</span><input id="previewCustomSafeRight" class="input" type="number" min="0" max="240" value="${custom.safeRight}"></label>
+  </div>`;
+}
+
+function previewSettingsFromControls() {
+  return {
+    focalPoint: {
+      x: Number($('previewFocalX')?.value ?? 0.5),
+      y: Number($('previewFocalY')?.value ?? 0.5)
+    },
+    zoom: Number($('previewZoom')?.value ?? 1),
+    overlayOpacity: Number($('previewOverlay')?.value ?? 0.12)
+  };
+}
+
+function updatePreviewDraft(frame, settings) {
+  const assignment = state.assignmentMap.get(frame.fragmentId) || frame.assignment;
+  if (!assignment) return;
+  if ($('previewUseOverride')?.checked) {
+    state.previewDraftAssignment = {
+      ...assignment,
+      deviceOverrides: {
+        ...(assignment.deviceOverrides || {}),
+        [state.previewDeviceId]: {
+          ...(assignment.deviceOverrides?.[state.previewDeviceId] || {}),
+          ...settings
+        }
+      }
+    };
+  } else {
+    state.previewDraftAssignment = { ...assignment, ...settings };
+  }
+}
+
+function warningAction(code) {
+  if (['missing-visual', 'low-resolution'].includes(code)) return { key: 'asset', label: 'Изображение' };
+  if (['many-lines', 'panel-ratio', 'text-overflow', 'min-text-size', 'touch-target'].includes(code)) return { key: 'text', label: 'Текст' };
+  if (code === 'focal-overlap') return { key: 'focal', label: 'Кадрирование' };
+  if (code === 'safe-area-overlap') return { key: 'safe', label: 'Safe area' };
+  return null;
+}
+
+function diagnosticDimensionStatus(diagnostics, codes) {
+  const relevant = diagnostics.warnings.filter(item => codes.includes(item.code));
+  if (relevant.some(item => item.level === 'error')) return 'error';
+  if (relevant.length) return 'warning';
+  return 'good';
+}
+
+function previewMatrixHtml(results) {
+  if (results.length < 2) return '';
+  const dimensions = [
+    ['Текст', ['many-lines', 'panel-ratio', 'text-overflow', 'min-text-size']],
+    ['Safe area', ['safe-area-overlap']],
+    ['Изображение', ['missing-visual', 'low-resolution', 'focal-overlap']],
+    ['Choice', ['many-options', 'touch-target']]
+  ];
+  const icon = status => status === 'good' ? '✓' : status === 'warning' ? '⚠' : '✕';
+  return `<div class="preview-matrix-wrap"><table class="preview-matrix"><thead><tr><th>Устройство</th>${dimensions.map(([label]) => `<th>${label}</th>`).join('')}</tr></thead><tbody>${results.map(result => `<tr><td>${Domain.escapeHtml(result.device.label)}</td>${dimensions.map(([, codes]) => { const status = diagnosticDimensionStatus(result.diagnostics, codes); return `<td><span class="preview-matrix-status" data-status="${status}">${icon(status)}</span></td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+
+function previewDiagnosticsHtml(results) {
+  const allWarnings = results.flatMap(result => result.diagnostics.warnings || []);
+  const errors = allWarnings.filter(item => item.level === 'error').length;
+  const warnings = allWarnings.length - errors;
+  const status = errors ? 'error' : warnings ? 'warning' : 'good';
+  const title = errors ? 'Требует исправления' : warnings ? 'Есть замечания' : 'Кадр готов';
+  const body = errors
+    ? `${errors} критических проблем · ${warnings} предупреждений`
+    : warnings ? `${warnings} предупреждений, критических проблем нет` : 'Проверки пройдены на выбранных устройствах';
+
+  return `<section class="preview-readiness" data-status="${status}"><span>Готовность кадра</span><strong>${title}</strong><p>${body}</p></section>
+    ${results.map(result => `<section class="preview-diagnostic-device"><header><strong>${Domain.escapeHtml(result.device.label)}</strong><span>${result.diagnostics.fontSize || '—'} px · панель ${Math.round(result.diagnostics.ratio * 100)}%</span></header>
+      ${result.diagnostics.warnings.length
+        ? result.diagnostics.warnings.map(item => { const action = warningAction(item.code); return `<div class="preview-diagnostic-item" data-level="${Domain.escapeHtml(item.level)}"><span>${Domain.escapeHtml(item.text)}</span>${action ? `<button type="button" data-preview-fix="${action.key}">${action.label} →</button>` : ''}</div>`; }).join('')
+        : '<div class="preview-diagnostic-item" data-level="good"><span>Критических проблем не обнаружено.</span></div>'}
+    </section>`).join('')}${previewMatrixHtml(results)}`;
+}
+
+async function openPreviewInProofreading() {
+  await persistWorkspaceSelection();
+  if (window.HEARTLINEProofreading?.open) return window.HEARTLINEProofreading.open();
+  return setRoute('reader');
+}
+
 async function renderPreview() {
-  state.previewDraftAssignment = null;
   if (!state.project) return renderNoProject('Превью');
   const frame = effectiveFrame();
   if (!frame) return renderNoProject('Превью');
-  const deviceVisual = Domain.visualForDevice(frame.assignment, state.previewDeviceId);
+  const device = currentPreviewDevice();
+  const deviceVisual = Domain.visualForDevice(frame.assignment, device.id);
   const hasOverride = Boolean(frame.assignment?.deviceOverrides?.[state.previewDeviceId]);
+
   view.className = 'view';
-  view.innerHTML = `<section class="page full"><div class="preview-layout"><aside class="preview-controls ${state.previewMobileSheet === 'controls' ? 'mobile-open' : ''}"><div class="preview-sheet-head"><strong>Настройки превью</strong><button id="closePreviewControls" class="icon-button" type="button">×</button></div><span class="kicker">MOBILE PREVIEW LAB</span><h2 style="margin:5px 0 16px">Настройки устройства</h2><div class="preview-control-group"><label class="field"><span>Устройство</span><select id="previewDevice" class="select">${Object.values(DEVICE_PRESETS).map(device => `<option value="${device.id}" ${device.id === state.previewDeviceId ? 'selected' : ''}>${device.label}</option>`).join('')}</select></label><label class="field"><span>Ориентация</span><select id="previewOrientation" class="select"><option value="portrait">Вертикальная</option><option value="landscape">Горизонтальная</option></select></label><label class="field"><span>Режим</span><select id="previewCompare" class="select"><option value="single">Одно устройство</option><option value="compare">Сравнить 3 устройства</option></select></label></div><div class="preview-control-group"><h3>Кадрирование</h3><label class="field"><span>Focal X</span><input id="previewFocalX" type="range" min="0" max="1" step="0.01" value="${deviceVisual.focalPoint.x}"></label><label class="field"><span>Focal Y</span><input id="previewFocalY" type="range" min="0" max="1" step="0.01" value="${deviceVisual.focalPoint.y}"></label><label class="field"><span>Zoom</span><input id="previewZoom" type="range" min="1" max="2.2" step="0.02" value="${deviceVisual.zoom}"></label><label class="field"><span>Прозрачность панели</span><input id="previewOverlay" type="range" min="0" max="0.35" step="0.01" value="${deviceVisual.overlayOpacity}"></label><label class="field" style="grid-template-columns:auto 1fr;align-items:center"><input id="previewUseOverride" type="checkbox" ${hasOverride ? 'checked' : ''}><span>Сохранить только для ${Domain.escapeHtml(DEVICE_PRESETS[state.previewDeviceId]?.label || state.previewDeviceId)}</span></label><button id="savePreviewCrop" class="button primary small">Сохранить кадрирование</button></div><div class="preview-control-group"><h3>Текст и панель</h3><label class="field"><span>Масштаб текста</span><input id="previewTextScale" type="range" min="0.85" max="1.35" step="0.05" value="${state.previewTextScale}"></label><label class="field"><span>Стиль панели</span><select id="previewPanelStyle" class="select"><option value="glass">Светлое стекло</option><option value="solid">Плотная</option></select></label></div><div class="preview-control-group"><h3>Кадр</h3><p><strong>${Domain.escapeHtml(frame.speaker || Domain.textTypeLabel(frame.type))}</strong><br><span class="muted">${Domain.escapeHtml(frame.fragmentId)}</span></p><div class="inline-actions"><button id="previewPrev" class="button secondary small">← Предыдущий</button><button id="previewNext" class="button secondary small">Следующий →</button></div><button id="previewReader" class="button secondary small" style="margin-top:8px">Открыть в Reader</button></div></aside><div class="preview-mobile-actions"><button id="mobilePreviewSettings" class="button secondary small">Настройки</button><button id="mobilePreviewDiagnostics" class="button secondary small">Проверка</button></div><main id="previewStage" class="preview-stage"></main><aside class="preview-diagnostics ${state.previewMobileSheet === 'diagnostics' ? 'mobile-open' : ''}"><div class="preview-sheet-head"><strong>Диагностика</strong><button id="closePreviewDiagnostics" class="icon-button" type="button">×</button></div><span class="kicker">QUALITY CHECK</span><h2 style="margin:5px 0 14px">Диагностика кадра</h2><div id="previewDiagnostics"></div></aside></div></section>`;
+  view.innerHTML = `<section class="page full"><div class="preview-layout">
+    <aside class="preview-controls ${state.previewMobileSheet === 'controls' ? 'mobile-open' : ''}">
+      <div class="preview-sheet-head"><strong>Настройки превью</strong><button id="closePreviewControls" class="icon-button" type="button">×</button></div>
+      <span class="kicker">PREVIEW LAB</span><h2 style="margin:5px 0 16px">Экран и кадрирование</h2>
+      <div class="preview-control-group">
+        <label class="field"><span>Устройство</span><select id="previewDevice" class="select">${previewDeviceOptionsHtml()}</select></label>
+        ${previewCustomDeviceHtml()}
+        <label class="field"><span>Ориентация</span><select id="previewOrientation" class="select"><option value="portrait">Вертикальная</option><option value="landscape">Горизонтальная</option></select></label>
+        <label class="field"><span>Режим</span><select id="previewCompare" class="select"><option value="single">Одно устройство</option><option value="compare">Сравнение устройств</option></select></label>
+        ${state.previewCompare ? previewComparePickerHtml() : ''}
+      </div>
+      <div class="preview-control-group"><h3>Кадрирование</h3>
+        <p class="preview-control-note">Можно перетаскивать focal point прямо на превью. Ctrl/⌘ + колесо меняет Zoom.</p>
+        <label class="field"><span>Focal X</span><input id="previewFocalX" type="range" min="0" max="1" step="0.01" value="${deviceVisual.focalPoint.x}"></label>
+        <label class="field"><span>Focal Y</span><input id="previewFocalY" type="range" min="0" max="1" step="0.01" value="${deviceVisual.focalPoint.y}"></label>
+        <label class="field"><span>Zoom</span><input id="previewZoom" type="range" min="1" max="2.2" step="0.02" value="${deviceVisual.zoom}"></label>
+        <label class="field"><span>Прозрачность панели</span><input id="previewOverlay" type="range" min="0" max="0.35" step="0.01" value="${deviceVisual.overlayOpacity}"></label>
+        <label class="field" style="grid-template-columns:auto 1fr;align-items:center"><input id="previewUseOverride" type="checkbox" ${hasOverride ? 'checked' : ''}><span>Сохранить только для ${Domain.escapeHtml(device.label)}</span></label>
+        <button id="savePreviewCrop" class="button primary small">Сохранить кадрирование</button>
+      </div>
+      <div class="preview-control-group"><h3>Текст и панель</h3>
+        <label class="field"><span>Масштаб текста</span><input id="previewTextScale" type="range" min="0.8" max="1.4" step="0.05" value="${state.previewTextScale}"></label>
+        <label class="field"><span>Стиль панели</span><select id="previewPanelStyle" class="select"><option value="glass">Светлое стекло</option><option value="solid">Плотная</option></select></label>
+      </div>
+      <div class="preview-control-group"><h3>Кадр</h3><p><strong>${Domain.escapeHtml(frame.speaker || Domain.textTypeLabel(frame.type))}</strong><br><span class="muted">${Domain.escapeHtml(frame.chapterTitle || '')} · ${Domain.escapeHtml(frame.sceneTitle || '')}</span></p></div>
+    </aside>
+
+    <div class="preview-mobile-actions"><button id="mobilePreviewSettings" class="button secondary small">Настройки</button><button id="mobilePreviewDiagnostics" class="button secondary small">Проверка</button></div>
+
+    <main class="preview-main">
+      <div class="preview-stage-toolbar">
+        <div class="preview-stage-title"><strong>${Domain.escapeHtml(device.label)}</strong><span>${state.previewOrientation === 'landscape' ? 'Горизонтальная' : 'Вертикальная'} ориентация${state.previewCompare ? ' · сравнение' : ''}</span></div>
+        <div class="preview-stage-tools">
+          <select id="previewScaleMode" class="select preview-scale-select"><option value="fit">Fit</option><option value="0.5">50%</option><option value="0.75">75%</option><option value="1">100%</option><option value="1.25">125%</option></select>
+          <label class="preview-safe-toggle"><input id="previewShowSafeArea" type="checkbox" ${state.previewShowSafeArea ? 'checked' : ''}> Safe area</label>
+        </div>
+      </div>
+      <div id="previewStage" class="preview-stage" data-mode="${state.previewCompare ? 'compare' : 'single'}"></div>
+      <div class="preview-stage-nav"><button id="previewPrev" class="button secondary">← Предыдущий</button><button id="previewReader" class="button secondary">Открыть в вычитке</button><button id="previewNext" class="button primary">Следующий →</button></div>
+    </main>
+
+    <aside class="preview-diagnostics ${state.previewMobileSheet === 'diagnostics' ? 'mobile-open' : ''}">
+      <div class="preview-sheet-head"><strong>Диагностика</strong><button id="closePreviewDiagnostics" class="icon-button" type="button">×</button></div>
+      <span class="kicker">QUALITY CHECK</span><h2 style="margin:5px 0 14px">Готовность кадра</h2><div id="previewDiagnostics"></div>
+    </aside>
+  </div></section>`;
+
   $('previewOrientation').value = state.previewOrientation;
   $('previewCompare').value = state.previewCompare ? 'compare' : 'single';
   $('previewPanelStyle').value = state.previewPanelStyle;
+  $('previewScaleMode').value = state.previewScaleMode;
   await renderPreviewStage();
-  for (const id of ['previewDevice', 'previewOrientation', 'previewCompare', 'previewTextScale', 'previewPanelStyle']) $(id).onchange = () => {
+
+  $('previewDevice').onchange = () => {
     state.previewDeviceId = $('previewDevice').value;
+    state.previewDraftAssignment = null;
+    renderPreview();
+  };
+  $('previewOrientation').onchange = () => {
     state.previewOrientation = $('previewOrientation').value;
+    renderPreviewStage();
+  };
+  $('previewCompare').onchange = () => {
     state.previewCompare = $('previewCompare').value === 'compare';
-    state.previewTextScale = Number($('previewTextScale').value);
+    renderPreview();
+  };
+  $('previewPanelStyle').onchange = () => {
     state.previewPanelStyle = $('previewPanelStyle').value;
-    if (id === 'previewDevice') return renderPreview();
     renderPreviewStage();
   };
-  for (const id of ['previewFocalX', 'previewFocalY', 'previewZoom', 'previewOverlay', 'previewTextScale']) $(id).oninput = () => {
-    state.previewTextScale = Number($('previewTextScale').value);
-    const assignment = state.assignmentMap.get(frame.fragmentId);
-    const settings = { focalPoint: { x: Number($('previewFocalX').value), y: Number($('previewFocalY').value) }, zoom: Number($('previewZoom').value), overlayOpacity: Number($('previewOverlay').value) };
-    if ($('previewUseOverride').checked) state.previewDraftAssignment = { ...assignment, deviceOverrides: { ...(assignment.deviceOverrides || {}), [state.previewDeviceId]: { ...(assignment.deviceOverrides?.[state.previewDeviceId] || {}), ...settings } } };
-    else state.previewDraftAssignment = { ...assignment, ...settings };
+  $('previewScaleMode').onchange = () => {
+    state.previewScaleMode = $('previewScaleMode').value;
     renderPreviewStage();
   };
+  $('previewShowSafeArea').onchange = () => {
+    state.previewShowSafeArea = $('previewShowSafeArea').checked;
+    renderPreviewStage();
+  };
+
+  for (const id of ['previewFocalX', 'previewFocalY', 'previewZoom', 'previewOverlay', 'previewTextScale']) {
+    $(id).oninput = () => {
+      state.previewTextScale = Number($('previewTextScale').value);
+      updatePreviewDraft(frame, previewSettingsFromControls());
+      renderPreviewStage();
+    };
+  }
+
+  view.querySelectorAll('[data-preview-preset]').forEach(button => button.onclick = () => {
+    state.previewComparisonPreset = button.dataset.previewPreset;
+    state.previewCompareDeviceIds = deviceProfileService.comparisonPreset(state.previewComparisonPreset).map(item => item.id);
+    renderPreview();
+  });
+  view.querySelectorAll('[data-preview-compare-device]').forEach(input => input.onchange = () => {
+    const next = new Set(state.previewCompareDeviceIds);
+    if (input.checked) {
+      if (next.size >= deviceProfileService.maxComparisonDevices) {
+        input.checked = false;
+        return toast(`Можно сравнивать не более ${deviceProfileService.maxComparisonDevices} устройств`);
+      }
+      next.add(input.dataset.previewCompareDevice);
+    } else {
+      next.delete(input.dataset.previewCompareDevice);
+      if (!next.size) {
+        input.checked = true;
+        return toast('Оставьте хотя бы одно устройство');
+      }
+    }
+    state.previewCompareDeviceIds = deviceProfileService.normalizeComparison([...next]);
+    state.previewComparisonPreset = 'custom';
+    renderPreviewStage();
+  });
+
+  if (state.previewDeviceId === 'custom') {
+    const customFields = {
+      previewCustomWidth: 'width', previewCustomHeight: 'height',
+      previewCustomSafeTop: 'safeTop', previewCustomSafeBottom: 'safeBottom',
+      previewCustomSafeLeft: 'safeLeft', previewCustomSafeRight: 'safeRight'
+    };
+    for (const [id, key] of Object.entries(customFields)) {
+      $(id).oninput = () => {
+        state.previewCustomDevice = { ...state.previewCustomDevice, [key]: Number($(id).value) };
+        renderPreviewStage();
+      };
+    }
+  }
+
   $('savePreviewCrop').onclick = async () => {
     const assignment = currentAssignment();
-    const settings = { focalPoint: { x: Number($('previewFocalX').value), y: Number($('previewFocalY').value) }, zoom: Number($('previewZoom').value), overlayOpacity: Number($('previewOverlay').value) };
+    const settings = previewSettingsFromControls();
     let after;
     if ($('previewUseOverride').checked) {
-      after = { ...assignment, deviceOverrides: { ...(assignment.deviceOverrides || {}), [state.previewDeviceId]: { ...(assignment.deviceOverrides?.[state.previewDeviceId] || {}), ...settings } }, status: assignment.status === 'approved' ? 'needs-review' : assignment.status, updatedAt: Domain.now() };
+      after = {
+        ...assignment,
+        deviceOverrides: {
+          ...(assignment.deviceOverrides || {}),
+          [state.previewDeviceId]: { ...(assignment.deviceOverrides?.[state.previewDeviceId] || {}), ...settings }
+        },
+        status: assignment.status === 'approved' ? 'needs-review' : assignment.status,
+        updatedAt: Domain.now()
+      };
     } else {
       const overrides = { ...(assignment.deviceOverrides || {}) };
       delete overrides[state.previewDeviceId];
-      after = { ...assignment, ...settings, deviceOverrides: overrides, status: assignment.status === 'approved' ? 'needs-review' : assignment.status, updatedAt: Domain.now() };
+      after = {
+        ...assignment, ...settings, deviceOverrides: overrides,
+        status: assignment.status === 'approved' ? 'needs-review' : assignment.status,
+        updatedAt: Domain.now()
+      };
     }
     state.previewDraftAssignment = null;
     await applyAssignmentChange(frame.fragmentId, after, 'preview crop');
     toast('Кадрирование сохранено');
     renderPreview();
   };
+
   $('previewPrev').onclick = () => movePreview(-1);
   $('previewNext').onclick = () => movePreview(1);
-  $('previewReader').onclick = () => setRoute('reader');
+  $('previewReader').onclick = openPreviewInProofreading;
   $('mobilePreviewSettings').onclick = () => { state.previewMobileSheet = state.previewMobileSheet === 'controls' ? 'none' : 'controls'; renderPreview(); };
   $('mobilePreviewDiagnostics').onclick = () => { state.previewMobileSheet = state.previewMobileSheet === 'diagnostics' ? 'none' : 'diagnostics'; renderPreview(); };
   $('closePreviewControls').onclick = () => { state.previewMobileSheet = 'none'; renderPreview(); };
@@ -1418,16 +1659,80 @@ async function renderPreviewStage() {
   const frame = effectiveFrame();
   const assetUrl = frame?.asset ? await Assets.assetObjectUrl(frame.asset.assetId) : null;
   let results;
+
   if (state.previewCompare) {
-    const devices = [DEVICE_PRESETS.android360, DEVICE_PRESETS.iphone390, DEVICE_PRESETS.android412];
-    results = renderDeviceComparison(host, devices.map(device => ({ frame, device, orientation: state.previewOrientation, assetUrl, textScale: state.previewTextScale, panelStyle: state.previewPanelStyle })));
+    const ids = deviceProfileService.normalizeComparison(state.previewCompareDeviceIds);
+    const devices = ids.map(id => deviceProfileService.get(id)).filter(Boolean);
+    const availableWidth = Math.max(600, host.clientWidth || 900);
+    const availableHeight = Math.max(420, host.clientHeight || 650);
+    const perDeviceWidth = Math.max(220, availableWidth / Math.max(1, Math.min(devices.length, 4)) - 34);
+    results = renderDeviceComparison(host, devices.map(device => ({
+      frame, device, orientation: state.previewOrientation, assetUrl,
+      textScale: state.previewTextScale, panelStyle: state.previewPanelStyle,
+      showSafeArea: state.previewShowSafeArea,
+      scale: calculatePreviewScale(device, state.previewOrientation, {
+        mode: 'fit',
+        availableWidth: perDeviceWidth,
+        availableHeight: availableHeight - 80,
+        fitFraction: .9,
+        maxScale: .72
+      })
+    })));
   } else {
-    const device = DEVICE_PRESETS[state.previewDeviceId] || DEVICE_PRESETS.iphone390;
-    const diagnostics = renderPlayerFrame(host, { frame, device, orientation: state.previewOrientation, assetUrl, textScale: state.previewTextScale, panelStyle: state.previewPanelStyle, onChoose: optionId => toast(`Preview выбора: ${optionId}`) });
+    const device = currentPreviewDevice();
+    const scale = calculatePreviewScale(device, state.previewOrientation, {
+      mode: state.previewScaleMode,
+      availableWidth: host.clientWidth || 900,
+      availableHeight: host.clientHeight || 720,
+      fitFraction: .84,
+      maxScale: 1.25
+    });
+    const diagnostics = renderPlayerFrame(host, {
+      frame, device, orientation: state.previewOrientation, assetUrl,
+      textScale: state.previewTextScale, panelStyle: state.previewPanelStyle,
+      scale, scaleToFit: false,
+      showSafeArea: state.previewShowSafeArea,
+      showFocalPoint: Boolean(assetUrl),
+      onChoose: optionId => toast(`Preview выбора: ${optionId}`),
+      onFocalPointChange: (point, meta) => {
+        if ($('previewFocalX')) $('previewFocalX').value = String(point.x);
+        if ($('previewFocalY')) $('previewFocalY').value = String(point.y);
+        updatePreviewDraft(frame, { ...previewSettingsFromControls(), focalPoint: point });
+        if (meta?.commit) renderPreviewStage();
+      },
+      onZoomChange: zoom => {
+        if ($('previewZoom')) $('previewZoom').value = String(zoom);
+        updatePreviewDraft(frame, { ...previewSettingsFromControls(), zoom });
+        renderPreviewStage();
+      }
+    });
     results = [{ device, diagnostics }];
   }
+
   const diagnosticHost = $('previewDiagnostics');
-  diagnosticHost.innerHTML = results.map(result => `<section class="inspector-section"><h3>${Domain.escapeHtml(result.device.label)}</h3><div class="diagnostic-list"><div class="diagnostic ${result.diagnostics.ok ? 'good' : 'warning'}">Строк текста: ${result.diagnostics.lines}<br>Высота панели: ${Math.round(result.diagnostics.ratio * 100)}% экрана</div>${result.diagnostics.warnings.length ? result.diagnostics.warnings.map(item => `<div class="diagnostic ${item.level}">${Domain.escapeHtml(item.text)}</div>`).join('') : '<div class="diagnostic good">Критических проблем не обнаружено.</div>'}</div></section>`).join('');
+  if (diagnosticHost) {
+    diagnosticHost.innerHTML = previewDiagnosticsHtml(results);
+    diagnosticHost.querySelectorAll('[data-preview-fix]').forEach(button => button.onclick = () => {
+      const action = button.dataset.previewFix;
+      if (action === 'asset') {
+        $('frameAssetInput').value = '';
+        $('frameAssetInput').click();
+      } else if (action === 'text') {
+        state.previewTextScale = Math.max(.8, Number((state.previewTextScale - .05).toFixed(2)));
+        if ($('previewTextScale')) $('previewTextScale').value = String(state.previewTextScale);
+        renderPreviewStage();
+      } else if (action === 'safe') {
+        state.previewShowSafeArea = true;
+        if ($('previewShowSafeArea')) $('previewShowSafeArea').checked = true;
+        renderPreviewStage();
+      } else if (action === 'focal') {
+        $('previewFocalY')?.focus();
+        state.previewShowSafeArea = true;
+        if ($('previewShowSafeArea')) $('previewShowSafeArea').checked = true;
+        renderPreviewStage();
+      }
+    });
+  }
 }
 
 async function movePreview(delta) {
@@ -1909,12 +2214,30 @@ async function exportRuntimeZip(draft) {
     entries.push({ name: `assets/${assetId}.${extension}`, data: new Uint8Array(await asset.blob.arrayBuffer()) });
   }
   const runtime = { schema: 'heartline-runtime-v3', title: state.project.title, versionId: state.version.versionId, builtAt: Domain.now(), draft, novel: content, visualManifest: manifest };
-  const [engineSource, domainSource, playerSource] = await Promise.all([fetch('./heartline-engine.js').then(r => r.text()), fetch('./heartline-domain.js').then(r => r.text()), fetch('./heartline-player-renderer.js').then(r => r.text())]);
+  const [engineSourceRaw, domainSource, playerSourceRaw, storyRuntimeSource, genericStoryProfileSource, legacyStoryProfileSource, deviceProfileSource] = await Promise.all([
+    fetch('./heartline-engine.js').then(r => r.text()),
+    fetch('./heartline-domain.js').then(r => r.text()),
+    fetch('./heartline-player-renderer.js').then(r => r.text()),
+    fetch('./hl-editor/application/story-profile-runtime.js').then(r => r.text()),
+    fetch('./hl-editor/infrastructure/story-profiles/generic-story-profile.js').then(r => r.text()),
+    fetch('./hl-editor/infrastructure/story-profiles/legacy-heartline-story-profile.js').then(r => r.text()),
+    fetch('./hl-editor/preview/domain/device-profile.js').then(r => r.text())
+  ]);
+  const engineSource = engineSourceRaw
+    .replace("./heartline-domain.js", "./domain.js")
+    .replace("./hl-editor/application/story-profile-runtime.js", "./story-profile-runtime.js");
+  const playerSource = playerSourceRaw
+    .replace("./heartline-domain.js", "./domain.js")
+    .replace("./hl-editor/preview/domain/device-profile.js", "./device-profile.js");
   entries.push(
     { name: 'runtime.json', data: JSON.stringify(runtime) },
     { name: 'engine.js', data: engineSource },
     { name: 'domain.js', data: domainSource },
     { name: 'player-renderer.js', data: playerSource },
+    { name: 'story-profile-runtime.js', data: storyRuntimeSource },
+    { name: 'generic-story-profile.js', data: genericStoryProfileSource },
+    { name: 'legacy-heartline-story-profile.js', data: legacyStoryProfileSource },
+    { name: 'device-profile.js', data: deviceProfileSource },
     { name: 'index.html', data: runtimeIndexHtml() },
     { name: 'runtime-player.js', data: runtimePlayerJs() },
     { name: 'runtime.css', data: runtimeCss() }
@@ -1925,7 +2248,7 @@ async function exportRuntimeZip(draft) {
 
 function runtimeIndexHtml() { return `<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>HEARTLINE</title><link rel="stylesheet" href="runtime.css"></head><body><main id="player"></main><script type="module" src="runtime-player.js"></script></body></html>`; }
 function runtimeCss() { return `*{box-sizing:border-box}html,body,#player{margin:0;width:100%;height:100%;overflow:hidden;background:#111;font-family:Inter,Arial,sans-serif}.player-device.runtime-bare{position:relative;border:0;border-radius:0;background:#111;overflow:hidden}.player-screen{position:relative;width:100%;height:100%;overflow:hidden;background:#ddd}.player-image{position:absolute;inset:0;width:100%;height:100%;display:block}.player-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;padding:40px;background:linear-gradient(145deg,#dddeda,#cfd1cc);color:#60625e;gap:9px}.player-placeholder-mark{width:52px;height:52px;border-radius:16px;background:#202020;color:white;display:grid;place-items:center;font-weight:800;font-size:22px}.player-placeholder span{max-width:250px;font-size:12px}.player-shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(0,0,0,.15),transparent 26%,transparent 52%,rgba(0,0,0,.5) 100%);pointer-events:none}.player-scene-label{position:absolute;left:16px;right:16px;top:calc(var(--safe-top) + 10px);display:flex;justify-content:space-between;color:white;text-shadow:0 1px 8px rgba(0,0,0,.75);font-size:10px}.player-scene-label span{font-weight:850;letter-spacing:.12em}.player-scene-label strong{max-width:62%;text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.player-dialogue-panel{position:absolute;left:12px;right:12px;bottom:calc(var(--safe-bottom) + 10px);border-radius:18px;padding:15px 16px 16px;background:rgba(255,255,255,calc(.76 + var(--overlay)));box-shadow:0 10px 30px rgba(0,0,0,.18);backdrop-filter:blur(18px);color:#171717}.player-dialogue-panel.thought .player-current-text,.player-dialogue-panel.narration .player-current-text{font-family:Georgia,"Times New Roman",serif;font-style:italic}.player-speaker{font-size:10px;font-weight:850;letter-spacing:.08em;margin-bottom:7px}.player-current-text{font-size:var(--frame-font);line-height:1.42;white-space:pre-wrap}.player-options{display:grid;gap:8px;margin-top:12px}.player-option{border:1px solid rgba(0,0,0,.15);background:rgba(255,255,255,.78);border-radius:11px;padding:10px 11px;text-align:left;font-size:calc(var(--frame-font) * .82)}.runtime-next{position:absolute;inset:0;border:0;background:transparent}`; }
-function runtimePlayerJs() { return `import {StoryEngine,createSession} from './engine.js';\nimport {renderPlayerFrame} from './player-renderer.js';\nconst data=await fetch('./runtime.json').then(r=>r.json());const host=document.getElementById('player');const session=createSession('runtime',data.versionId,data.novel);const engine=new StoryEngine(data.novel,session);engine.advance();function ref(id){for(const s of data.novel.scenes){const stack=[...(s.steps||[])];while(stack.length){const x=stack.shift();if(x.fragmentId===id)return{x,s};if(x.type==='choice')for(const o of x.options||[])stack.push(...(o.steps||[]));}}}function draw(){const e=engine.currentEntry();if(!e)return;const r=ref(e.fragmentId);if(!r)return;const st=r.x,m=data.visualManifest[e.fragmentId]||{},path=m.assetId?data.visualManifest.__assets?.[m.assetId]:null;const frame={fragmentId:e.fragmentId,sceneId:r.s.id,sceneTitle:r.s.title,type:st.type,speaker:st.speaker||'',text:st.type==='choice'?(st.prompt||''):(st.text||''),options:st.type==='choice'?(st.options||[]).map(o=>({id:o.id,label:o.label})):[],visualPrompt:r.s.title,assignment:m,asset:null};const device={id:'runtime',label:'Runtime',width:window.innerWidth,height:window.innerHeight,safeTop:Math.max(20,Number(getComputedStyle(document.documentElement).getPropertyValue('--sat')||0)),safeBottom:24,fontSize:Math.max(16,Math.min(20,window.innerWidth/22))};renderPlayerFrame(host,{frame,device,orientation:window.innerWidth>window.innerHeight?'landscape':'portrait',assetUrl:path,scaleToFit:false,bare:true,showStatusBar:false,onChoose:id=>{engine.choose(id);draw()}});if(st.type!=='choice'){const next=document.createElement('button');next.className='runtime-next';next.setAttribute('aria-label','Далее');next.onclick=()=>{engine.forward();draw()};host.querySelector('.player-screen').append(next)}}window.addEventListener('resize',draw);draw();`; }
+function runtimePlayerJs() { return `import {StoryEngine,createSession} from './engine.js';\nimport {renderPlayerFrame} from './player-renderer.js';\nconst [{setStoryProfileResolver},{GenericStoryProfile},{LegacyHeartlineStoryProfile}]=await Promise.all([import('./story-profile-runtime.js'),import('./generic-story-profile.js'),import('./legacy-heartline-story-profile.js')]);setStoryProfileResolver(content=>LegacyHeartlineStoryProfile.matches(content)?LegacyHeartlineStoryProfile:GenericStoryProfile);const data=await fetch('./runtime.json').then(r=>r.json());const host=document.getElementById('player');const session=createSession('runtime',data.versionId,data.novel);const engine=new StoryEngine(data.novel,session);engine.advance();function ref(id){for(const s of data.novel.scenes){const stack=[...(s.steps||[])];while(stack.length){const x=stack.shift();if(x.fragmentId===id)return{x,s};if(x.type==='choice')for(const o of x.options||[])stack.push(...(o.steps||[]));}}}function draw(){const e=engine.currentEntry();if(!e)return;const r=ref(e.fragmentId);if(!r)return;const st=r.x,m=data.visualManifest[e.fragmentId]||{},path=m.assetId?data.visualManifest.__assets?.[m.assetId]:null;const frame={fragmentId:e.fragmentId,sceneId:r.s.id,sceneTitle:r.s.title,type:st.type,speaker:st.speaker||'',text:st.type==='choice'?(st.prompt||''):(st.text||''),options:st.type==='choice'?(st.options||[]).map(o=>({id:o.id,label:o.label})):[],visualPrompt:r.s.title,assignment:m,asset:null};const device={id:'runtime',label:'Runtime',width:window.innerWidth,height:window.innerHeight,safeTop:Math.max(20,Number(getComputedStyle(document.documentElement).getPropertyValue('--sat')||0)),safeBottom:24,fontSize:Math.max(16,Math.min(20,window.innerWidth/22))};renderPlayerFrame(host,{frame,device,orientation:window.innerWidth>window.innerHeight?'landscape':'portrait',assetUrl:path,scaleToFit:false,bare:true,showStatusBar:false,onChoose:id=>{engine.choose(id);draw()}});if(st.type!=='choice'){const next=document.createElement('button');next.className='runtime-next';next.setAttribute('aria-label','Далее');next.onclick=()=>{engine.forward();draw()};host.querySelector('.player-screen').append(next)}}window.addEventListener('resize',draw);draw();`; }
 
 function exportReviewsCsv() {
   const rows = state.reviews.map(review => ({ reviewId: review.reviewId, targetType: review.targetType, fragmentId: review.fragmentId, category: review.category, severity: review.severity, status: review.status, comment: review.comment, quotedText: review.quotedText || '' }));

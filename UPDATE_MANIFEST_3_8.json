@@ -1,0 +1,41 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.8.0",
+  "baseCommit": "42c1864633a93de7fafd7a40796a0eff709cc9ce",
+  "mode": "non-destructive-update-with-migration",
+  "migration": "node tools/apply-preview-lab-3.8.mjs",
+  "replace": [],
+  "migrationModifies": [
+    "heartline-app.js",
+    "heartline-domain.js",
+    "heartline-player-renderer.js",
+    "hl-editor/bootstrap/composition-root.js",
+    "index.html",
+    "sw.js",
+    "tools/verify-repository.mjs",
+    "package.json"
+  ],
+  "add": [
+    "hl-editor/preview/domain/device-profile.js",
+    "hl-editor/preview/application/device-profile-service.js",
+    "hl-editor/preview/infrastructure/builtin-device-profile-catalog.js",
+    "hl-editor/preview/presentation/preview-lab.css",
+    "tools/apply-preview-lab-3.8.mjs",
+    "tools/verify-preview-architecture.mjs",
+    "tests/device-profile.test.js",
+    "tests/preview-diagnostics.test.js",
+    "tests/preview-architecture.test.js",
+    "tests/runtime-module-closure.test.js",
+    "APPLY_3_8.md",
+    "ARCHITECTURE_PREVIEW_3_8.md",
+    "QA_PREVIEW_3_8.md",
+    "VALIDATION_3_8.txt",
+    "UPDATE_MANIFEST_3_8.json",
+    "SHA256SUMS_3_8.txt",
+    "README_v380.txt"
+  ],
+  "delete": [],
+  "stagingFiles": [
+    "tools/preview-lab-3.8/heartline-player-renderer.js"
+  ]
+}

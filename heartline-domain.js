@@ -183,29 +183,74 @@ export function sceneFrameMetrics(content, sceneId, assignments, reviews) {
 }
 
 export function frameDiagnostics(frame, device, visualSettings, textScale = 1) {
-  const width = device.width;
-  const height = device.height;
-  const fontSize = Math.max(14, Math.round((device.fontSize || 17) * textScale));
-  const approximateCharsPerLine = Math.max(18, Math.floor((width - 48) / (fontSize * 0.52)));
+  const width = Number(device.width || 390);
+  const height = Number(device.height || 844);
+  const safeTop = Number(device.safeTop || 0);
+  const safeRight = Number(device.safeRight || 0);
+  const safeBottom = Number(device.safeBottom || 0);
+  const safeLeft = Number(device.safeLeft || 0);
+  const usableWidth = Math.max(120, width - safeLeft - safeRight);
+  const usableHeight = Math.max(160, height - safeTop - safeBottom);
+  const fontSize = Math.max(10, Math.round((device.fontSize || 17) * textScale));
+  const approximateCharsPerLine = Math.max(16, Math.floor((usableWidth - 48) / (fontSize * 0.52)));
   const text = frame?.text || '';
   const lines = Math.max(1, Math.ceil(text.length / approximateCharsPerLine));
   const speakerLines = frame?.speaker ? 1 : 0;
-  const optionLines = frame?.options?.length ? frame.options.reduce((sum, option) => sum + Math.max(1, Math.ceil(option.label.length / approximateCharsPerLine)), 0) : 0;
+  const optionLines = frame?.options?.length
+    ? frame.options.reduce((sum, option) => sum + Math.max(1, Math.ceil(option.label.length / approximateCharsPerLine)), 0)
+    : 0;
   const lineHeight = fontSize * 1.42;
-  const panelHeight = 40 + (lines + speakerLines + optionLines) * lineHeight + (optionLines ? frame.options.length * 12 : 0);
-  const ratio = panelHeight / height;
-  const safeBottom = device.safeBottom || 20;
+  const optionSpacing = optionLines ? frame.options.length * 12 : 0;
+  const panelHeight = 40 + (lines + speakerLines + optionLines) * lineHeight + optionSpacing;
+  const ratio = panelHeight / usableHeight;
   const warnings = [];
-  if (!frame?.assignment?.assetId) warnings.push({ code: 'missing-visual', level: 'error', text: 'Изображение не назначено.' });
-  if (frame?.asset && (frame.asset.width < width * 2 || frame.asset.height < height * 1.2)) warnings.push({ code: 'low-resolution', level: 'warning', text: 'Разрешение изображения может быть недостаточным для этого устройства.' });
-  if (lines > 8) warnings.push({ code: 'many-lines', level: 'warning', text: `Текст занимает около ${lines} строк. Рассмотрите разделение реплики.` });
-  if (ratio > 0.45) warnings.push({ code: 'panel-ratio', level: 'error', text: `Текстовая панель занимает около ${Math.round(ratio * 100)}% экрана.` });
-  else if (ratio > 0.34) warnings.push({ code: 'panel-ratio', level: 'warning', text: `Текстовая панель занимает около ${Math.round(ratio * 100)}% экрана.` });
+
+  if (!frame?.assignment?.assetId) {
+    warnings.push({ code: 'missing-visual', level: 'error', text: 'Изображение не назначено.' });
+  }
+  if (frame?.asset && (frame.asset.width < width * 2 || frame.asset.height < height * 1.2)) {
+    warnings.push({ code: 'low-resolution', level: 'warning', text: 'Разрешение изображения может быть недостаточным для этого viewport.' });
+  }
+  if (fontSize < 15) {
+    warnings.push({ code: 'min-text-size', level: 'error', text: `Текст слишком мелкий: около ${fontSize}px.` });
+  } else if (fontSize < 16) {
+    warnings.push({ code: 'min-text-size', level: 'warning', text: `Размер текста около ${fontSize}px — проверьте читаемость.` });
+  }
+  if (lines > 8) {
+    warnings.push({ code: 'many-lines', level: 'warning', text: `Текст занимает около ${lines} строк. Рассмотрите разделение реплики.` });
+  }
+  if (ratio > 0.5) {
+    warnings.push({ code: 'panel-ratio', level: 'error', text: `Текстовая панель занимает около ${Math.round(ratio * 100)}% безопасной высоты.` });
+  } else if (ratio > 0.36) {
+    warnings.push({ code: 'panel-ratio', level: 'warning', text: `Текстовая панель занимает около ${Math.round(ratio * 100)}% безопасной высоты.` });
+  }
+
   const focalY = visualSettings?.focalPoint?.y ?? 0.5;
-  const panelTop = 1 - ratio - safeBottom / height;
-  if (focalY > panelTop) warnings.push({ code: 'focal-overlap', level: 'warning', text: 'Текстовая панель перекрывает focal point изображения.' });
-  if (frame?.options?.length > 4) warnings.push({ code: 'many-options', level: 'warning', text: 'На экране больше четырёх вариантов выбора.' });
-  return { lines, panelHeight: Math.round(panelHeight), ratio, warnings, ok: !warnings.some(item => item.level === 'error') };
+  const panelTop = 1 - (panelHeight + safeBottom + 10) / height;
+  if (focalY > panelTop) {
+    warnings.push({ code: 'focal-overlap', level: 'warning', text: 'Текстовая панель перекрывает focal point изображения.' });
+  }
+
+  const optionTargetHeight = fontSize * 1.42 * .82 + 20;
+  if (frame?.options?.length && optionTargetHeight < 44) {
+    warnings.push({ code: 'touch-target', level: 'warning', text: 'Варианты выбора могут иметь слишком маленькую touch-area.' });
+  }
+  if (frame?.options?.length > 4) {
+    warnings.push({ code: 'many-options', level: 'warning', text: 'На экране больше четырёх вариантов выбора.' });
+  }
+
+  return {
+    lines,
+    fontSize,
+    panelHeight: Math.round(panelHeight),
+    ratio,
+    safeArea: { top: safeTop, right: safeRight, bottom: safeBottom, left: safeLeft },
+    usableWidth,
+    usableHeight,
+    optionTargetHeight: Math.round(optionTargetHeight),
+    warnings,
+    ok: !warnings.some(item => item.level === 'error')
+  };
 }
 
 export function recordHistory(workspace, event) {

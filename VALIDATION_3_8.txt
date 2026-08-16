@@ -1,0 +1,55 @@
+HEARTLINE 3.8 Preview Lab validation
+=====================================
+
+Base: HEARTLINE 3.7.1 / 42c1864633a93de7fafd7a40796a0eff709cc9ce
+
+Migration safety
+----------------
+CRLF/LF-safe migration fixture: PASS
+Existing player renderer is not overwritten during ZIP extraction.
+The new renderer is staged and installed only after migration validation.
+Migration rollback path is retained for modified existing files.
+
+Transformed fixture syntax
+--------------------------
+heartline-app.js: PASS
+heartline-domain.js: PASS
+composition-root.js: PASS
+heartline-player-renderer.js: PASS
+
+Preview / architecture / runtime tests
+--------------------------------------
+16 tests
+16 pass
+0 fail
+
+Preview architecture gate
+-------------------------
+PASS
+
+Covered contracts
+-----------------
+- data-driven viewport catalog;
+- representative iOS / Android / Foldable profiles;
+- custom viewport;
+- max-four comparison selection;
+- orientation + safe-area geometry;
+- responsive Fit/fixed Preview scaling;
+- no DEVICE_PRESETS in renderer/Presentation;
+- DeviceProfileService is injected from composition root;
+- enhanced text/safe-area/touch diagnostics;
+- runtime export closes StoryProfile and DeviceProfile module dependencies.
+
+Release gate
+------------
+Run in the complete repository after migration:
+
+npm.cmd run verify-repository
+npm.cmd test
+npm.cmd run check
+
+Scope
+-----
+Preview/device-profile feature only, plus a runtime module-closure compatibility
+fix exposed by the 3.7 modularization. projectId, source save, conflict hashes,
+recovery, revisions, backups and proofreading state are unchanged.

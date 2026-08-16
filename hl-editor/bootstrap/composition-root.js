@@ -14,6 +14,8 @@ import { BrowserProofreadingRepository } from '../proofreading/infrastructure/br
 import { ProofreadingService } from '../proofreading/application/proofreading-service.js';
 import { BrowserSampleCatalogRepository } from '../infrastructure/browser-sample-catalog-repository.js';
 import { SampleCatalogService } from '../application/sample-catalog-service.js';
+import { DeviceProfileService } from '../preview/application/device-profile-service.js';
+import { BUILTIN_DEVICE_PROFILE_CATALOG, BUILTIN_DEVICE_COMPARISON_PRESETS, DEFAULT_PREVIEW_DEVICE_ID } from '../preview/infrastructure/builtin-device-profile-catalog.js';
 import { setAppServices } from '../application/service-container.js';
 import { configureNovelParser } from '../../heartline-domain.js';
 import { configureDbAdapters } from '../../heartline-db.js';
@@ -57,6 +59,11 @@ const storyProfileRegistry = new StoryProfileRegistry([GenericStoryProfile, Lega
 setStoryProfileResolver(content => storyProfileRegistry.resolve(content));
 
 const sampleCatalogService = new SampleCatalogService(new BrowserSampleCatalogRepository('./samples/catalog.json'));
+const deviceProfileService = new DeviceProfileService(BUILTIN_DEVICE_PROFILE_CATALOG, {
+  defaultId: DEFAULT_PREVIEW_DEVICE_ID,
+  comparisonPresets: BUILTIN_DEVICE_COMPARISON_PRESETS,
+  maxComparisonDevices: 4
+});
 
 export const appServices = Object.freeze({
   policies,
@@ -67,7 +74,8 @@ export const appServices = Object.freeze({
   proofreadingRepository,
   proofreadingService,
   storyProfileRegistry,
-  sampleCatalogService
+  sampleCatalogService,
+  deviceProfileService
 });
 
 setAppServices(appServices);
@@ -79,4 +87,4 @@ window.HEARTLINEStoryProfiles = Object.freeze({
   staticTargets(content, raw, sceneIds) { return storyProfileRegistry.resolve(content).staticTargets({ content, raw, sceneIds }); }
 });
 
-window.HEARTLINEApp = Object.freeze({ services: appServices, version: '3.7.0' });
+window.HEARTLINEApp = Object.freeze({ services: appServices, version: window.HEARTLINE_BUILD || 'current' });
