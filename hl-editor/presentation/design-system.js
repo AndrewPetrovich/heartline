@@ -146,19 +146,10 @@ async function enhanceLibrary() {
     await Promise.all(cards.map(async card => {
       if (card.dataset.hlDsCard === '2') return;
       card.dataset.hlDsCard = '2';
-      const stats = card.querySelector('.project-stats-grid');
-      const production = card.querySelector('.project-production-row');
-      let details = card.querySelector('.hl-project-details');
-      let detailsBody = details?.querySelector('.hl-ds-disclosure-body') || null;
-      if (!details && (stats || production)) {
-        const disclosure = createDisclosure('Структура и производство', 'hl-project-details');
-        details = disclosure.details;
-        detailsBody = disclosure.body;
-        const anchor = stats || production;
-        anchor.parentElement.insertBefore(details, anchor);
-      }
-      if (detailsBody && stats && stats.parentElement !== detailsBody) detailsBody.appendChild(stats);
-      if (detailsBody && production && production.parentElement !== detailsBody) detailsBody.appendChild(production);
+      const placeholder = card.querySelector('.project-cover-placeholder');
+      placeholder?.querySelectorAll(':scope > span, :scope > strong').forEach(node => node.remove());
+      card.querySelectorAll('.hl-project-details,.project-stats-grid,.project-production-row').forEach(node => node.remove());
+      const details = null;
 
       card.querySelector('.hl-project-proofreading')?.remove();
       try {
@@ -439,9 +430,6 @@ function scheduleEnhance() {
 }
 
 installStyles();
-const observer = new MutationObserver(scheduleEnhance);
-observer.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'hidden'] });
-document.addEventListener('click', scheduleEnhance, true);
 scheduleEnhance();
 
-window.HEARTLINEDesignSystem = Object.freeze({ enhance: scheduleEnhance, version: '1.1.0' });
+window.HEARTLINEDesignSystem = Object.freeze({ enhance: scheduleEnhance, version: '1.2.0' });

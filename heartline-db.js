@@ -24,6 +24,9 @@ const STORE_DEFS = {
 };
 
 let openPromise = null;
+let parserAdapter = null;
+
+export function configureDbAdapters({ parser } = {}) { parserAdapter = parser || null; }
 
 function requestToPromise(request) {
   return new Promise((resolve, reject) => {
@@ -181,8 +184,7 @@ function clone(value) { return typeof structuredClone === 'function' ? structure
 function assignmentId(scopeId, fragmentId) { return `va:${scopeId}:${fragmentId}`; }
 
 function makeMissingAssignments(projectId, scopeId, content) {
-  const parser = typeof window !== 'undefined' ? window.HEARTLINEParser : null;
-  const fragments = parser?.flattenFragments ? parser.flattenFragments(content) : [];
+  const fragments = parserAdapter?.flattenFragments ? parserAdapter.flattenFragments(content) : [];
   return fragments.filter(fragment => fragment.type !== 'tech').map(fragment => ({
     assignmentId: assignmentId(scopeId, fragment.fragmentId), projectId, scopeId, fragmentId: fragment.fragmentId,
     assetId: null, fit: 'cover', focalPoint: { x: 0.5, y: 0.5 }, zoom: 1, overlayOpacity: 0.12,

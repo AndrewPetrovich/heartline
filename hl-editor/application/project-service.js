@@ -23,7 +23,8 @@ export class ProjectService {
     const stored = normalizeProjectContext(await this.sourceAdapter.readContext(binding));
     const now = this.clock();
     const projectId = stored?.projectId || this.uuid();
-    const existingDocument = stored?.documents?.find(item => item.relativePath === source.relativePath);
+    const knownDocuments = stored?.documents || [];
+    const existingDocument = knownDocuments.find(item => item.relativePath === source.relativePath) || (knownDocuments.length === 1 ? knownDocuments[0] : null);
     const documentId = existingDocument?.documentId || this.uuid();
     let existingProject = await this.contextRepository.getProject(projectId);
     if (!existingProject) {

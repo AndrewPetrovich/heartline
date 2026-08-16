@@ -2,7 +2,7 @@ import { readFile, writeFile, mkdir, copyFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 
 const EXPECTED_VERSION = '3.6.4';
-const TARGET_VERSION = '3.7.0';
+const TARGET_VERSION = '3.7.1';
 const backupRoot = path.join('.git', 'heartline-update-backups', TARGET_VERSION);
 
 async function read(file) { return readFile(file, 'utf8'); }
@@ -17,8 +17,11 @@ async function backup(file) {
 const staged = new Map();
 async function update(file, transform) {
   const before = await read(file);
-  const after = await transform(before);
-  if (after === before) throw new Error(`${file}: architecture migration made no change`);
+  const eol = before.includes('\r\n') ? '\r\n' : '\n';
+  const normalized = before.replace(/\r\n/g, '\n');
+  const transformed = await transform(normalized);
+  if (transformed === normalized) throw new Error(`${file}: architecture migration made no change`);
+  const after = eol === '\r\n' ? transformed.replace(/\n/g, '\r\n') : transformed;
   staged.set(file, { before, after });
 }
 function replaceExact(source, oldValue, newValue, label) {
@@ -189,19 +192,20 @@ await update('tools/verify-repository.mjs', source => {
 });
 
 await update('sw.js', source => {
-  source = source.replace(/heartline-editor-3\.6\.4-readiness-restored/, 'heartline-editor-3.7.0-architecture-consolidation');
+  source = source.replace(/heartline-editor-3\.6\.4-readiness-restored/, 'heartline-editor-3.7.1-architecture-consolidation');
   source = source.replace("'./hl-editor/presentation/font-policy.js','./hl-editor/presentation/font-policy.css','./hl-editor/presentation/library-card-cleanup.js','./hl-editor/presentation/library-card-cleanup.css',", "'./hl-editor/presentation/font-policy.js','./hl-editor/presentation/font-policy.css','./hl-editor/presentation/presentation-coordinator.js','./hl-editor/bootstrap/composition-root.js','./hl-editor/application/story-profile-runtime.js','./hl-editor/application/story-profile-registry.js','./hl-editor/application/source-adapter-registry.js','./hl-editor/application/legacy-editor-gateway.js','./hl-editor/application/asset-application-service.js','./hl-editor/application/sample-catalog-service.js','./hl-editor/application/service-container.js','./hl-editor/ports/story-format-profile.js','./hl-editor/ports/sample-catalog-repository.js','./hl-editor/infrastructure/story-profiles/generic-story-profile.js','./hl-editor/infrastructure/story-profiles/legacy-heartline-story-profile.js','./hl-editor/infrastructure/source-adapters/heartline-json-source-adapter.js','./hl-editor/infrastructure/source-adapters/heartline-json-source-policy.js','./hl-editor/infrastructure/browser-sample-catalog-repository.js','./samples/catalog.json',");
   return source;
 });
 
 await update('index.html', source => source
-  .replace('<title>HEARTLINE Editor 3.6.4</title>', '<title>HEARTLINE Editor 3.7.0</title>')
-  .replace("window.HEARTLINE_BUILD='3.6.4-readiness-restored'", "window.HEARTLINE_BUILD='3.7.0-architecture-consolidation'")
+  .replace('<title>HEARTLINE Editor 3.6.4</title>', '<title>HEARTLINE Editor 3.7.1</title>')
+  .replace("window.HEARTLINE_BUILD='3.6.4-readiness-restored'", "window.HEARTLINE_BUILD='3.7.1-architecture-consolidation'")
 );
 
 packageJson.version = TARGET_VERSION;
+packageJson.scripts['check:syntax'] = 'node tools/check-js-syntax.mjs';
 packageJson.scripts['verify-architecture'] = 'node tools/verify-architecture.mjs';
-packageJson.scripts.check = packageJson.scripts.check.includes('verify-architecture') ? packageJson.scripts.check : `${packageJson.scripts.check} && node tools/verify-architecture.mjs`;
+packageJson.scripts.check = 'node tools/check-js-syntax.mjs && node tools/verify-font-policy.mjs && node tools/verify-architecture.mjs';
 staged.set('package.json', { before: await read('package.json'), after: JSON.stringify(packageJson, null, 2) + '\n' });
 
 // Commit only after every expected source pattern has been validated in memory.
@@ -230,4 +234,4 @@ try {
 }
 
 console.log(`HEARTLINE 3.7 architecture consolidation applied (${staged.size} files updated, ${deletes.length} obsolete patch files removed).`);
-console.log('Next: npm run verify-repository && npm test && npm run check');
+console.log('Next on Windows: npm.cmd run verify-repository && npm.cmd test && npm.cmd run check');

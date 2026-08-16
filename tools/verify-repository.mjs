@@ -5,7 +5,7 @@ const required = [
   'heartline-graph.js','heartline-graph-model.js','heartline-graph-analysis.js','heartline-graph-layout.js','heartline-graph-layout-worker.js','heartline-graph-renderers.js','heartline-graph-navigation.js','heartline-graph2.css',
   'heartline-player-renderer.js','heartline-project-stats.js','heartline-image-worker.js','heartline-nav-fix.js','heartline-nav-fix.css','heartline-reader-cleanup.css','heartline-reader-hierarchy.css','heartline-library-cards.css',
   'novel.json','moon-oath.json','icon-192.png','icon-512.png','manifest.webmanifest','sw.js',
-  'hl-editor/index.js','hl-editor/presentation/design-system.js','hl-editor/presentation/design-system.css','hl-editor/presentation/font-policy.js','hl-editor/presentation/font-policy.css','hl-editor/presentation/library-card-cleanup.js','hl-editor/presentation/library-card-cleanup.css','hl-editor/application/project-service.js','hl-editor/infrastructure/browser-context-repository.js','hl-editor/presentation/bridge.js',
+  'hl-editor/index.js','hl-editor/presentation/design-system.js','hl-editor/presentation/design-system.css','hl-editor/presentation/font-policy.js','hl-editor/presentation/font-policy.css','hl-editor/presentation/presentation-coordinator.js','hl-editor/bootstrap/composition-root.js','hl-editor/application/story-profile-runtime.js','hl-editor/application/story-profile-registry.js','hl-editor/application/service-container.js','hl-editor/application/source-adapter-registry.js','hl-editor/application/legacy-editor-gateway.js','hl-editor/application/asset-application-service.js','hl-editor/application/sample-catalog-service.js','hl-editor/ports/story-format-profile.js','hl-editor/ports/sample-catalog-repository.js','hl-editor/infrastructure/story-profiles/generic-story-profile.js','hl-editor/infrastructure/story-profiles/legacy-heartline-story-profile.js','hl-editor/infrastructure/source-adapters/heartline-json-source-adapter.js','hl-editor/infrastructure/source-adapters/heartline-json-source-policy.js','hl-editor/infrastructure/browser-sample-catalog-repository.js','samples/catalog.json','hl-editor/application/project-service.js','hl-editor/infrastructure/browser-context-repository.js','hl-editor/presentation/bridge.js',
   'hl-editor/proofreading/domain/proofreading.js','hl-editor/proofreading/application/proofreading-service.js','hl-editor/proofreading/ports/proofreading-repository.js','hl-editor/proofreading/infrastructure/browser-proofreading-repository.js','hl-editor/proofreading/presentation/proofreading-workspace.js','hl-editor/proofreading/presentation/proofreading.css'
 ];
 
@@ -23,7 +23,7 @@ if(!index.includes('hl-editor/index.js')||!index.includes('heartline-typography.
 }
 
 const editorEntry=await readFile('hl-editor/index.js','utf8');
-if(!editorEntry.includes("presentation/font-policy.js")||!editorEntry.includes("presentation/library-card-cleanup.js")){
+if(!editorEntry.includes("presentation/font-policy.js")||!editorEntry.includes("presentation/presentation-coordinator.js")||!editorEntry.includes("bootstrap/composition-root.js")){
   console.error('hl-editor/index.js is not wired to the unified font/library Presentation policies');
   process.exit(1);
 }

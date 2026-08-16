@@ -1,10 +1,8 @@
-import { BrowserProofreadingRepository } from '../infrastructure/browser-proofreading-repository.js';
-import { ProofreadingService } from '../application/proofreading-service.js';
+import { getAppServices } from '../../application/service-container.js';
 import { TEXT_REVIEW_CATEGORIES, workflowStatusFromLegacy } from '../domain/proofreading.js';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const repository = new BrowserProofreadingRepository();
 const READER_PREFS_KEY = 'heartline-reader-prefs-v1';
 let service = null;
 let active = false;
@@ -29,13 +27,7 @@ let readerPrefs = loadReaderPrefs();
 function persistReaderPrefs() { localStorage.setItem(READER_PREFS_KEY, JSON.stringify(readerPrefs)); }
 
 function getService() {
-  if (service) return service;
-  service = new ProofreadingService({
-    repository,
-    projectService: window.HEARTLINEProjectCore?.projectService || null,
-    uuid: () => crypto.randomUUID(),
-    clock: () => new Date().toISOString()
-  });
+  service ||= getAppServices().proofreadingService;
   return service;
 }
 
@@ -586,12 +578,14 @@ function adaptLegacyUi() {
   if (storyboard) storyboard.style.display = '';
 }
 
-const observer = new MutationObserver(() => { installNavigation(); adaptLegacyUi(); redirectLegacyReaderIfNeeded(); });
-observer.observe(document.documentElement, { childList: true, subtree: true });
 document.addEventListener('keydown', proofreadingHotkeys);
 installStyles();
 installNavigation();
 adaptLegacyUi();
 redirectLegacyReaderIfNeeded();
 
-window.HEARTLINEProofreading = Object.freeze({ open: openProofreading, get service() { return getService(); } });
+window.HEARTLINEProofreading = Object.freeze({
+  open: openProofreading,
+  get service() { return getService(); },
+  enhance() { installNavigation(); adaptLegacyUi(); redirectLegacyReaderIfNeeded(); }
+});

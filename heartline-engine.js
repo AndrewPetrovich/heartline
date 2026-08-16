@@ -1,4 +1,5 @@
 import { clone, now } from './heartline-domain.js';
+import { resolveStoryProfile } from './hl-editor/application/story-profile-runtime.js';
 
 export function createSession(projectId, versionId, content) {
   return {
@@ -11,7 +12,7 @@ export function createSession(projectId, versionId, content) {
     ip: 0,
     branch: null,
     pendingChoice: null,
-    vars: { HONESTY: 0, ATTRACTION: 0, TRUST: 0, PROFESSIONAL_COST: 0, ...(content.initialVars || {}) },
+    vars: { ...resolveStoryProfile(content).initialVariables(content), ...(content.initialVars || {}) },
     tech: { bg: '', cg: '', music: '', sfx: '', sprite: '', reaction: '', fade: '' },
     choices: [],
     timeline: [],
@@ -24,6 +25,7 @@ export class StoryEngine {
   constructor(content, session) {
     this.content = content;
     this.session = session;
+    this.profile = resolveStoryProfile(content);
   }
 
   currentEntry() { return this.session.timeline[this.session.viewIndex] || null; }
@@ -152,45 +154,21 @@ export class StoryEngine {
     }
   }
   evaluateRoute() {
-    const scores = [
-      ['ROUTE_EQUAL', Number(this.variable('HONESTY') || 0)],
-      ['ROUTE_FIRE', Number(this.variable('ATTRACTION') || 0)],
-      ['ROUTE_MASK', Number(this.variable('TRUST') || 0)]
-    ].sort((left, right) => right[1] - left[1]);
-    if (scores[0][1] - scores[1][1] >= 2 && scores.filter(item => item[1] === scores[0][1]).length === 1) {
-      this.setVariable('ROUTE_ID', scores[0][0]);
-      this.setVariable('DIRECT_ROUTE_CHOICE', false);
-    } else {
-      this.setVariable('ROUTE_ID', '');
-      this.setVariable('DIRECT_ROUTE_CHOICE', true);
-    }
+    return Boolean(this.profile?.evaluateRoute?.({ get: key => this.variable(key), set: (key, value) => this.setVariable(key, value) }));
   }
   executeSystem(value) {
     const source = String(value || '').trim();
-    if (/^Сравнить\s+HONESTY/i.test(source)) { this.evaluateRoute(); return; }
-    if (/^FLAG_[A-Z0-9_]+\s*=/i.test(source)) for (const part of source.split(';')) this.applySet(part.trim());
-    if (/^END\s+ROUTE_/i.test(source)) {
-      this.session.ended = true;
-      const route = (source.match(/ROUTE_[A-Z]+/i) || [''])[0].replace('ROUTE_', '');
-      this.pushEnd(`Конец маршрута ${route}.`);
-    }
+    const handled = this.profile?.executeSystem?.({
+      source, get: key => this.variable(key), set: (key, next) => this.setVariable(key, next),
+      applySet: item => this.applySet(item),
+      end: text => { this.session.ended = true; this.pushEnd(text || 'Конец маршрута.'); }
+    });
+    if (handled) return;
+    if (/^END\b/i.test(source)) { this.session.ended = true; this.pushEnd('Конец доступного сценария.'); }
   }
   resolveGoto(raw) {
     const target = String(raw || '').trim().replace(/[.;]+$/, '');
-    if (/соответствующая маршрутная сцена/i.test(target)) {
-      if (this.boolVariable('FLAG_PACT_EQUAL')) return 'CH03_SC03_EQUAL';
-      if (this.boolVariable('FLAG_PACT_FIRE')) return 'CH03_SC03_FIRE';
-      if (this.boolVariable('FLAG_PACT_MASK')) return 'CH03_SC03_MASK';
-      return 'CH03_SC03_EQUAL';
-    }
-    if (/согласно ROUTE_ID/i.test(target)) {
-      const route = this.variable('ROUTE_ID');
-      if (route === 'ROUTE_EQUAL') return 'CH06_SC05_EQUAL';
-      if (route === 'ROUTE_FIRE') return 'CH06_SC05_FIRE';
-      if (route === 'ROUTE_MASK') return 'CH06_SC05_MASK';
-      return 'CH06_SC04_DIRECT';
-    }
-    return target;
+    return this.profile?.resolveGoto?.({ target, get: key => this.variable(key), hasScene: id => Boolean(this.scene(id)) }) || target;
   }
   jumpTo(target) {
     const scene = this.scene(target);
@@ -249,8 +227,9 @@ export class StoryEngine {
 
   advance() {
     if (this.session.pendingChoice || this.session.ended) return this.currentEntry();
+    const maxAdvanceSteps = 800;
     let safety = 0;
-    while (safety++ < 800) {
+    while (safety++ < maxAdvanceSteps) {
       const sequence = this.currentSequence();
       if (!sequence) { this.pushEnd('Не удалось восстановить ветку.'); break; }
       if (sequence.ip >= sequence.steps.length) {

@@ -1,8 +1,8 @@
 // HEARTLINE Editor 3.1 Quality Pass — cross-device Reader, review, diff and preflight workflow
-import * as DB from './heartline-db.js';
+import * as DB from './hl-editor/application/legacy-editor-gateway.js';
 import * as Domain from './heartline-domain.js';
 import { StoryEngine, createSession } from './heartline-engine.js';
-import * as Assets from './heartline-assets.js';
+import * as Assets from './hl-editor/application/asset-application-service.js';
 import { DEVICE_PRESETS, renderPlayerFrame, renderDeviceComparison, orientedDevice } from './heartline-player-renderer.js';
 import { buildGraph, layoutGraph, renderGraph, renderGraphOutline, renderGraphMinimap, enableGraphNavigation, consequenceSet, graphFixtureSummary, presentationStats, clearGraphLayoutCache } from './heartline-graph.js';
 import * as ProjectStats from './heartline-project-stats.js';
@@ -16,7 +16,7 @@ const parser = window.HEARTLINEParser;
 
 const READER_PREFS_KEY = 'heartline-reader-prefs-v1';
 function loadReaderPrefs() {
-  const defaults = { context: 'auto', textScale: 1, lineHeight: 1.58, font: 'serif', columnWidth: 790, focus: false };
+  const defaults = { context: 'auto', textScale: 1, lineHeight: 1.58, font: 'sans', columnWidth: 790, focus: false };
   try { return { ...defaults, ...JSON.parse(localStorage.getItem(READER_PREFS_KEY) || '{}') }; }
   catch (_) { return defaults; }
 }
@@ -174,10 +174,9 @@ async function loadCollections() {
 }
 
 async function ensureBuiltinProjects() {
-  const builtins = [
-    { file: './novel.json', stableId: 'poslednyaya-podacha', aliases: ['poslednyaya-podacha-heartline-branching2-20260808'], sourceType: 'builtin-poslednyaya-podacha' },
-    { file: './moon-oath.json', stableId: 'moon_oath', aliases: [], sourceType: 'builtin-moon-oath' }
-  ];
+  let builtins = [];
+  try { builtins = await window.HEARTLINEApp.services.sampleCatalogService.list(); }
+  catch (error) { console.warn('Не удалось загрузить каталог встроенных проектов', error); return; }
   const projects = await DB.getAll('projects');
 
   for (const builtin of builtins) {

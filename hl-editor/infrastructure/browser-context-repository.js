@@ -182,7 +182,7 @@ export class BrowserProjectContextRepository {
   async importTransportAsNew({ projectId, title, content, validation, sourceType, now }) {
     const versionId = `${projectId}::working`;
     const project = {
-      projectId, title, activeVersionId: versionId, sourceBacked: false, transportOnly: true,
+      projectId, title, activeVersionId: versionId, sourceBacked: false, transportOnly: true, requiresSourceAttachment: true,
       formatVersion: 4, createdAt: now, updatedAt: now,
       review: { status: 'not-started', reviewedHash: null, reviewedAt: null }
     };

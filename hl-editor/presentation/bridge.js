@@ -1,31 +1,9 @@
-import * as DB from '../../heartline-db.js';
+import * as DB from '../application/legacy-editor-gateway.js';
 import * as Domain from '../../heartline-domain.js';
-import { mergePolicies } from '../config.js';
-import { BrowserHashService } from '../infrastructure/browser-hash-service.js';
-import { BrowserFsSourceProjectAdapter } from '../infrastructure/browser-fs-source-adapter.js';
-import { BrowserProjectContextRepository } from '../infrastructure/browser-context-repository.js';
-import { ProjectService } from '../application/project-service.js';
-import { ImportService } from '../application/import-service.js';
+import { getAppServices } from '../application/service-container.js';
 import { SourceConflictError } from '../ports/source-project-adapter.js';
 
-const parser = window.HEARTLINEParser;
-const policies = mergePolicies();
-const contextRepository = new BrowserProjectContextRepository();
-const sourceAdapter = new BrowserFsSourceProjectAdapter({ policies, parser });
-const projectService = new ProjectService({
-  sourceAdapter,
-  contextRepository,
-  hashService: new BrowserHashService(),
-  uuid: () => crypto.randomUUID(),
-  clock: () => new Date().toISOString(),
-  policies
-});
-const importService = new ImportService({
-  contextRepository, projectService, parser,
-  uuid: () => crypto.randomUUID(),
-  clock: () => new Date().toISOString(),
-  policies
-});
+const { policies, projectService, importService } = getAppServices();
 
 const saveTimers = new Map();
 const saveLocks = new Map();
@@ -321,11 +299,9 @@ document.addEventListener('keydown', event => {
   }
 }, true);
 
-const observer = new MutationObserver(() => { enhanceLibrary(); enhanceExport(); });
-observer.observe(document.documentElement, { childList: true, subtree: true });
-
 installStyles();
 ensureBanner();
 setTimeout(() => { enhanceLibrary(); enhanceExport(); surfaceRecovery().catch(error => logTechnical('recovery', error)); }, 0);
 
 window.HEARTLINEProjectCore = Object.freeze({ projectService, importService, connectSourceFolder, flushSourceSave, createBackupForActiveProject });
+window.HEARTLINEProjectBridge = Object.freeze({ enhance() { enhanceLibrary(); enhanceExport(); }, surfaceRecovery });

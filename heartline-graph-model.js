@@ -1,17 +1,7 @@
 import { sceneFrameMetrics } from './heartline-domain.js';
+import { resolveStoryProfile } from './hl-editor/application/story-profile-runtime.js';
 
-const ROUTE_LABELS = {
-  common: 'Общая линия',
-  equal: 'На равных',
-  fire: 'Игра с огнём',
-  mask: 'Без масок',
-  direct: 'Прямой маршрут',
-  oath: 'Финал A',
-  network: 'Финал B',
-  break: 'Финал C',
-  conditional: 'Условные фрагменты',
-  unclassified: 'Не классифицировано'
-};
+const ROUTE_LABELS = Object.freeze({ common: 'Общая линия', conditional: 'Условные фрагменты', unclassified: 'Не классифицировано' });
 
 function uniq(items) { return [...new Set((items || []).filter(Boolean))]; }
 function safeArray(value) { return Array.isArray(value) ? value : []; }
@@ -48,7 +38,7 @@ function variablesFromCondition(value) {
 
 function conditionDecisionIds(value) {
   const raw = typeof value === 'object' ? JSON.stringify(value) : String(value || '');
-  return uniq([...raw.matchAll(/(?:choice\.)?\b((?:C\d{2}|FINAL|E\d(?:_[A-Z]+)?))\b/gi)].map(match => match[1].toUpperCase()));
+  return uniq([...raw.matchAll(/\bchoice\.([A-Za-z0-9_-]+)\b/gi)].map(match => match[1]));
 }
 
 function normalizeBranchContext(value) {
@@ -68,18 +58,9 @@ function sceneWordCount(scene) {
   return words;
 }
 
-function routeKey(scene, sourceLayoutByScene = new Map()) {
-  if (scene?.finalRoute === 'A') return 'oath';
-  if (scene?.finalRoute === 'B') return 'network';
-  if (scene?.finalRoute === 'C') return 'break';
-  const hint = String(scene?.editor?.routeHint || sourceLayoutByScene.get(scene?.id)?.routeHint || '').toLowerCase();
-  if (['equal', 'fire', 'mask', 'direct'].includes(hint)) return hint;
-  const id = String(scene?.id || '').toUpperCase();
-  if (/(?:^|_)EQUAL(?:_|$)/.test(id)) return 'equal';
-  if (/(?:^|_)FIRE(?:_|$)/.test(id)) return 'fire';
-  if (/(?:^|_)MASK(?:_|$)/.test(id)) return 'mask';
-  if (/(?:^|_)DIRECT(?:_|$)/.test(id)) return 'direct';
-  return 'common';
+function routeKey(scene, sourceLayoutByScene = new Map(), content = null) {
+  const layout = sourceLayoutByScene.get(scene?.id) || null;
+  return resolveStoryProfile(content).routeKey({ scene, layout, content }) || 'common';
 }
 
 function sourceGraphFromContent(content) {
@@ -217,11 +198,11 @@ function decisionDependencies(decisions, sceneRecords) {
   decisions.forEach(decision => {
     decision.affectedSceneIds = [...(affectedSceneIds.get(decision.choiceId) || [])];
     decision.affectedDecisionIds = [...(affectedDecisionIds.get(decision.choiceId) || [])].filter(id => id !== decision.choiceId);
-    decision.influencesEnding = decision.choiceId === 'FINAL' || decision.affectedSceneIds.some(id => /(?:ch1[01]|ep|final)/i.test(id)) || /финал|кульминац/i.test(`${decision.title} ${decision.editorialTrace}`);
+    decision.influencesEnding = decision.affectedSceneIds.some(id => sceneRecords.some(scene => scene.id === id && sceneEnds(scene))) || /финал|кульминац/i.test(`${decision.title} ${decision.editorialTrace}`);
   });
 }
 
-function logicalDecisions(occurrences, sceneRecords) {
+function logicalDecisions(occurrences, sceneRecords, content) {
   const sceneById = new Map(sceneRecords.map(scene => [scene.id, scene]));
   const grouped = new Map();
   occurrences.forEach(occurrence => {
@@ -236,7 +217,7 @@ function logicalDecisions(occurrences, sceneRecords) {
       optionMap.get(key).occurrences.push(item.occurrenceId);
     }));
     const text = items.map(item => `${item.prompt} ${item.editorialTrace} ${item.materialTrace}`).join(' ');
-    const mainLattice = /^C(?:0[1-9]|1\d|2[0-2])$/i.test(choiceId);
+    const mainLattice = Boolean(resolveStoryProfile(content).isMainDecision?.(choiceId));
     const effects = [...optionMap.values()].flatMap(option => option.effects);
     const significant = items.some(item => item.options.some(option => option.gotos.length || option.effects.length || option.conditions.length)) || items.length > 1;
     const occurrenceScenes = items.map(item => sceneById.get(item.sceneId)).filter(Boolean);
@@ -280,25 +261,24 @@ function logicalDecisions(occurrences, sceneRecords) {
   return decisions;
 }
 
-function resolveTarget(raw, sceneIds) {
+function resolveTarget(raw, sceneIds, content = null) {
   const value = String(raw || '').trim().replace(/[.;]+$/, '').replace(/^GOTO\s+/i, '').trim();
   if (!value) return [];
   if (sceneIds.has(value)) return [value];
-  if (/соответствующая маршрутная сцена/i.test(value)) return ['CH03_SC03_EQUAL', 'CH03_SC03_FIRE', 'CH03_SC03_MASK'].filter(id => sceneIds.has(id));
-  if (/согласно\s+ROUTE_ID/i.test(value)) return ['CH06_SC04_DIRECT', 'CH06_SC05_EQUAL', 'CH06_SC05_FIRE', 'CH06_SC05_MASK'].filter(id => sceneIds.has(id));
-  return [];
+  return resolveStoryProfile(content).staticTargets({ content, raw: value, sceneIds }) || [];
 }
 
 function createEndingNodes(content, scenes, sourceSceneEdges, sourceLayoutByScene) {
   const finals = safeArray(content?.storyMetadata?.finals || content?.finals);
   if (finals.length) return finals.map((item, index) => {
     const endingId = String(item?.id || String.fromCharCode(65 + index)).toUpperCase();
+    const endingRoute = resolveStoryProfile(content).endingRouteKey({ item, index, endingId, content });
     return {
       id: `ending:${endingId}`, kind: 'ending', endingId,
       title: item?.title || item?.name || `Финал ${endingId}`,
-      routeKey: endingId === 'A' ? 'oath' : endingId === 'B' ? 'network' : endingId === 'C' ? 'break' : 'common',
-      laneId: endingId === 'A' ? 'oath' : endingId === 'B' ? 'network' : endingId === 'C' ? 'break' : 'common',
-      storylineIds: [endingId === 'A' ? 'oath' : endingId === 'B' ? 'network' : endingId === 'C' ? 'break' : 'common'],
+      routeKey: endingRoute,
+      laneId: endingRoute,
+      storylineIds: [endingRoute],
       structuralGroupId: scenes.at(-1)?.structuralGroupId || null,
       order: scenes.length + index,
       chapterTitle: scenes.at(-1)?.chapterTitle || 'Финалы',
@@ -312,13 +292,13 @@ function createEndingNodes(content, scenes, sourceSceneEdges, sourceLayoutByScen
   const terminals = scenes.filter(scene => !out.get(scene.id));
   const groups = new Map();
   terminals.forEach(scene => {
-    const key = routeKey(scene, sourceLayoutByScene);
+    const key = routeKey(scene, sourceLayoutByScene, content);
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(scene);
   });
   return [...groups].map(([key, items], index) => ({
     id: `ending:${key}:${index}`, kind: 'ending', endingId: key.toUpperCase(),
-    title: key === 'common' ? items[0]?.title || 'Финал' : ROUTE_LABELS[key] || items[0]?.title || 'Финал',
+    title: key === 'common' ? items[0]?.title || 'Финал' : resolveStoryProfile(content).routeLabel(key) || items[0]?.title || 'Финал',
     routeKey: key, laneId: key, storylineIds: [key], structuralGroupId: items.at(-1)?.structuralGroupId || items[0]?.structuralGroupId || null,
     order: scenes.length + index, chapterTitle: items[0]?.chapterTitle || 'Финалы',
     sourceSceneIds: items.map(scene => scene.id),
@@ -361,7 +341,7 @@ function inferredEdges(content, scenes, occurrencesByScene, endings) {
       occurrences.forEach((occurrence, occurrenceIndex) => {
         const nextOccurrence = occurrences[occurrenceIndex + 1] || null;
         occurrence.options.forEach(option => {
-          const targets = uniq(option.gotos.flatMap(raw => resolveTarget(raw, ids)));
+          const targets = uniq(option.gotos.flatMap(raw => resolveTarget(raw, ids, content)));
           if (targets.length) {
             targets.forEach(target => result.push({ from: occurrence.id, to: `scene:${target}`, kind: 'option', label: option.label, optionId: option.id, source: 'inferred' }));
             return;
@@ -389,7 +369,7 @@ function inferredEdges(content, scenes, occurrencesByScene, endings) {
   return result;
 }
 
-function attachEndings(edges, endings, scenes, sourceLayoutByScene) {
+function attachEndings(edges, endings, scenes, sourceLayoutByScene, content) {
   const result = [...edges];
   const out = new Map(scenes.map(scene => [`scene:${scene.id}`, 0]));
   result.forEach(edge => out.set(edge.from, (out.get(edge.from) || 0) + 1));
@@ -405,7 +385,7 @@ function attachEndings(edges, endings, scenes, sourceLayoutByScene) {
       return;
     }
     const terminal = scenes.filter(scene => !out.get(`scene:${scene.id}`));
-    const matched = terminal.filter(scene => routeKey(scene, sourceLayoutByScene) === ending.routeKey);
+    const matched = terminal.filter(scene => routeKey(scene, sourceLayoutByScene, content) === ending.routeKey);
     (matched.length ? matched : terminal).forEach(scene => {
       if (!result.some(edge => edge.from === `scene:${scene.id}` && edge.to === ending.id)) result.push({ from: `scene:${scene.id}`, to: ending.id, kind: 'ending', source: 'virtual' });
     });
@@ -413,10 +393,10 @@ function attachEndings(edges, endings, scenes, sourceLayoutByScene) {
   return result;
 }
 
-function sourceDrivenStoryline(scene, sourceLayoutByScene, overrides = {}) {
+function sourceDrivenStoryline(scene, sourceLayoutByScene, overrides = {}, content = null) {
   const manual = overrides?.sceneStorylines?.[scene.id];
   if (Array.isArray(manual) && manual.length) return { ids: manual, source: 'manual', confidence: 1 };
-  const route = routeKey(scene, sourceLayoutByScene);
+  const route = routeKey(scene, sourceLayoutByScene, content);
   if (route !== 'common') return { ids: [route], source: 'routeHint', confidence: 1 };
   let conditional = false;
   walkSteps(scene.steps || [], step => { if (step?.branchContext) conditional = true; });
@@ -424,10 +404,10 @@ function sourceDrivenStoryline(scene, sourceLayoutByScene, overrides = {}) {
   return { ids: ['common'], source: 'common', confidence: 1 };
 }
 
-function storylineCatalog(sceneRecords) {
+function storylineCatalog(sceneRecords, content) {
   const ids = uniq(sceneRecords.flatMap(scene => scene.storylineIds));
-  const order = ['common', 'equal', 'fire', 'mask', 'direct', 'conditional', 'oath', 'network', 'break', 'unclassified'];
-  return ids.map(id => ({ id, title: ROUTE_LABELS[id] || id, order: order.indexOf(id) >= 0 ? order.indexOf(id) : 99 })).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, 'ru'));
+  const profile = resolveStoryProfile(content);
+  return ids.map((id, index) => ({ id, title: profile.routeLabel(id) || ROUTE_LABELS[id] || id, order: profile.storylineOrder?.(id, index) ?? index })).sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, 'ru'));
 }
 
 function graphIndex(nodes, edges) {
@@ -489,8 +469,6 @@ function fixtureSummary(model) {
     maxFanIn: sceneEdges.length ? Math.max(0, ...inDegree.values()) : model.maxFanIn,
     maxFanOut: sceneEdges.length ? Math.max(0, ...outDegree.values()) : model.maxFanOut,
     mainDecisionIds: model.decisions.filter(decision => decision.mainLattice).length,
-    c15Occurrences: model.decisions.find(decision => decision.choiceId === 'C15')?.occurrenceCount || 0,
-    c18Occurrences: model.decisions.find(decision => decision.choiceId === 'C18')?.occurrenceCount || 0,
     branchMarkers: fixture.branchMarkers ?? model.sceneRecords.reduce((sum, scene) => sum + scene.branchMarkers, 0),
     variables: fixture.variables ?? model.variables.length,
     reviewRoutes: model.reviewRoutes.length,
@@ -522,14 +500,14 @@ export function buildStoryGraphModel(content, assignments = [], reviews = [], { 
       if (step?.condition) { conditionDecisionIds(step.condition).forEach(id => dependencies.add(id)); variablesFromCondition(step.condition).forEach(variable => variableDependencies.add(variable)); }
     });
     const groupId = scene?.editor?.group || sourceLayoutByScene.get(scene.id)?.group || scene.chapterId || scene.chapterTitle || 'OTHER';
-    const classification = sourceDrivenStoryline(scene, sourceLayoutByScene, graphOverrides || content?.storyMetadata?.graphOverrides || {});
+    const classification = sourceDrivenStoryline(scene, sourceLayoutByScene, graphOverrides || content?.storyMetadata?.graphOverrides || {}, content);
     return {
       ...scene,
       order,
       code: scene.code || null,
       chapterTitle: scene.chapterTitle || groupById.get(groupId)?.title || 'Другие',
       structuralGroupId: groupId,
-      routeKey: routeKey(scene, sourceLayoutByScene),
+      routeKey: routeKey(scene, sourceLayoutByScene, content),
       storylineIds: classification.ids,
       primaryStorylineId: classification.ids[0] || 'common',
       storylineSource: classification.source,
@@ -545,7 +523,7 @@ export function buildStoryGraphModel(content, assignments = [], reviews = [], { 
     };
   });
   const sceneById = new Map(sceneRecords.map(scene => [scene.id, scene]));
-  const decisions = logicalDecisions(occurrences, sceneRecords);
+  const decisions = logicalDecisions(occurrences, sceneRecords, content);
   const sceneNodes = sceneRecords.map(scene => ({
     id: `scene:${scene.id}`, kind: 'scene', sceneId: scene.id, title: scene.title,
     code: scene.code, chapterId: scene.chapterId || null, chapterTitle: scene.chapterTitle,
@@ -559,7 +537,7 @@ export function buildStoryGraphModel(content, assignments = [], reviews = [], { 
   const provisionalSceneEdges = sourceGraph?.edges || scenes.slice(0, -1).map((scene, index) => ({ from: scene.id, to: scenes[index + 1].id }));
   const endings = createEndingNodes(content, sceneRecords, provisionalSceneEdges, sourceLayoutByScene);
   let edges = sourceGraph ? sourceEdges(sourceGraph, bySceneChoice) : inferredEdges(content, sceneRecords, byScene, endings);
-  edges = attachEndings(edges, endings, sceneRecords, sourceLayoutByScene);
+  edges = attachEndings(edges, endings, sceneRecords, sourceLayoutByScene, content);
 
   const baseNodes = [...sceneNodes, ...occurrenceNodes, ...endings];
   const index = graphIndex(baseNodes, edges);
@@ -588,7 +566,7 @@ export function buildStoryGraphModel(content, assignments = [], reviews = [], { 
     edges,
     chapterOrder: uniq(sceneRecords.map(scene => scene.chapterTitle)),
     structuralGroups: groups,
-    storylines: storylineCatalog(sceneRecords),
+    storylines: storylineCatalog(sceneRecords, content),
     routeFamilies: [],
     reviewRoutes: safeArray(content?.storyMetadata?.reviewRoutes || content?.reviewRoutes),
     variables,

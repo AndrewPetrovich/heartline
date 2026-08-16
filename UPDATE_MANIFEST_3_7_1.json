@@ -1,0 +1,17 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.7.1",
+  "baseCommit": "ddd01537d5f5d396ba82bc2817932f453c36c5b5",
+  "purpose": "windows-crlf-migration-and-portable-check-fix",
+  "replace": [
+    "tools/apply-architecture-consolidation.mjs"
+  ],
+  "add": [
+    "tools/check-js-syntax.mjs",
+    "APPLY_3_7_1.md",
+    "QA_3_7_1.md",
+    "UPDATE_MANIFEST_3_7_1.json",
+    "VALIDATION_3_7_1.txt",
+    "SHA256SUMS_3_7_1.txt"
+  ]
+}

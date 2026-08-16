@@ -6,7 +6,6 @@ export const PROJECT_POLICIES = Object.freeze({
   revisionRetention: 50,
   revisionMinIntervalMs: 5 * 60 * 1000,
   backupRetention: 10,
-  sourceDocumentCandidates: Object.freeze(['novel.json']),
   transportExtensions: Object.freeze(['.json', '.docx', '.zip']),
   archive: Object.freeze({
     maxEntries: 2000,

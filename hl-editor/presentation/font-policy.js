@@ -29,25 +29,16 @@ function removeLegacyFontControl(root = document) {
   document.querySelector('.hl-proofreading-shell')?.classList.add('hl-proof-font-sans');
 }
 
-function inspectAddedNode(node) {
-  if (!(node instanceof Element)) return;
-  removeLegacyFontControl(node);
-  if (node.matches?.('#hlProofFont')) node.closest('label')?.remove();
+
+function applyFontPolicy() {
+  installStyle();
+  normalizeReaderPreference();
+  removeLegacyFontControl();
 }
 
-installStyle();
-normalizeReaderPreference();
-removeLegacyFontControl();
-
-const observer = new MutationObserver(records => {
-  for (const record of records) {
-    for (const node of record.addedNodes) inspectAddedNode(node);
-  }
-  removeLegacyFontControl();
-});
-observer.observe(document.documentElement, { childList: true, subtree: true });
-
+applyFontPolicy();
 window.HEARTLINEFontPolicy = Object.freeze({
   family: 'Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif',
-  version: '1.0.0'
+  apply: applyFontPolicy,
+  version: '1.1.0'
 });

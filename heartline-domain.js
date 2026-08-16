@@ -26,9 +26,11 @@ export function plural(value, one, few, many) {
   return many;
 }
 
+let novelParser = null;
+export function configureNovelParser(parserAdapter) { novelParser = parserAdapter; }
 export function parser() {
-  if (!window.HEARTLINEParser) throw new Error('Parser HEARTLINE не загружен');
-  return window.HEARTLINEParser;
+  if (!novelParser) throw new Error('Novel parser adapter is not configured');
+  return novelParser;
 }
 
 export function normalizeNovel(content) { return parser().normalizeNovel(content); }
