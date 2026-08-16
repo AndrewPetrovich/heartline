@@ -181,7 +181,8 @@ function visualCenterHtml(unit) {
   return `<section class="hl-editorial-preview-center ${finalEditOpen ? 'editing-text' : ''}">
     ${previewToolbarHtml()}
     <div id="hlEditorialPreviewCanvas" class="hl-editorial-preview-canvas" aria-live="polite"></div>
-    ${finalEditor || caption}
+    ${caption}
+    ${finalEditor}
   </section>`;
 }
 
@@ -286,6 +287,14 @@ function renderWorkspace() {
     <input id="hlEditorialVisualInput" type="file" accept="image/*" hidden>
   </section>`;
 
+  if (stage !== 'text') {
+    try {
+      renderImmediatePreviewShell();
+    } catch (error) {
+      console.error('[HEARTLINE:editorial-preview-shell]', error);
+      renderPreviewFailure($('hlEditorialPreviewCanvas'), error);
+    }
+  }
   bindWorkspace();
   if (stage !== 'text') renderPreview().catch(error => toast(error.message || error, 'error'));
 }
@@ -445,6 +454,71 @@ async function updateVisual(patch) {
   await reload();
 }
 
+function previewFrameFromUnit(unit) {
+  return {
+    fragmentId: unit.fragmentId,
+    sceneId: unit.sceneId,
+    sceneTitle: unit.sceneTitle,
+    type: unit.type,
+    speaker: unit.speaker,
+    text: unit.text,
+    options: unit.options || [],
+    visualPrompt: unit.sceneTitle,
+    assignment: unit.assignment,
+    asset: unit.asset
+  };
+}
+
+function previewFitBounds(host) {
+  const bounds = host?.getBoundingClientRect?.() || {};
+  const center = host?.closest?.('.hl-editorial-center')?.getBoundingClientRect?.() || {};
+  return {
+    availableWidth: Math.max(320, Number(bounds.width || center.width || 720)),
+    availableHeight: Math.max(480, Number(bounds.height || center.height || 720)),
+    fitFraction: .88,
+    maxScale: 1.2
+  };
+}
+
+function renderImmediatePreviewShell() {
+  const unit = currentUnit();
+  const host = $('hlEditorialPreviewCanvas');
+  if (!unit || !host) return false;
+
+  const frame = previewFrameFromUnit(unit);
+  const fitBounds = previewFitBounds(host);
+
+  if (stage === 'final' && previewCompare) {
+    const profiles = model.targetProfiles.slice(0, 4);
+    renderDeviceComparison(host, profiles.map(device => ({
+      frame,
+      device,
+      orientation: previewOrientation,
+      assetUrl: null,
+      textScale: 1,
+      panelStyle: 'glass',
+      fitBounds: { ...fitBounds, fitFraction: .62, maxScale: .72 },
+      showSafeArea: previewShowSafeArea
+    })));
+  } else {
+    const device = deviceProfileService.resolve(previewDeviceId) || deviceProfileService.defaultProfile();
+    renderPlayerFrame(host, {
+      frame,
+      device,
+      orientation: previewOrientation,
+      assetUrl: null,
+      textScale: 1,
+      panelStyle: 'glass',
+      fitBounds,
+      showSafeArea: previewShowSafeArea,
+      showFocalPoint: stage === 'visual' && unit.visualReady
+    });
+  }
+
+  host.dataset.renderState = unit.assetId ? 'hydrating' : 'placeholder';
+  return Boolean(host.querySelector('.player-device'));
+}
+
 async function nextPaint() {
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 }
@@ -466,6 +540,12 @@ async function renderPreview() {
   const host = $('hlEditorialPreviewCanvas');
   if (!unit || !host) return;
 
+  if (!unit.assetId) {
+    if (!host.querySelector('.player-device')) renderImmediatePreviewShell();
+    host.dataset.renderState = 'placeholder';
+    return;
+  }
+
   host.dataset.renderState = 'loading';
   await nextPaint();
   if (generation !== previewRenderGeneration || !host.isConnected || currentUnit()?.fragmentId !== unit.fragmentId) return;
@@ -474,27 +554,8 @@ async function renderPreview() {
     const assetUrl = unit.assetId ? await workflowService.assetObjectUrl(unit.assetId) : null;
     if (generation !== previewRenderGeneration || !host.isConnected || currentUnit()?.fragmentId !== unit.fragmentId) return;
 
-    const frame = {
-      fragmentId: unit.fragmentId,
-      sceneId: unit.sceneId,
-      sceneTitle: unit.sceneTitle,
-      type: unit.type,
-      speaker: unit.speaker,
-      text: unit.text,
-      options: unit.options || [],
-      visualPrompt: unit.sceneTitle,
-      assignment: unit.assignment,
-      asset: unit.asset
-    };
-
-    const bounds = host.getBoundingClientRect();
-    const center = host.closest('.hl-editorial-center')?.getBoundingClientRect();
-    const fitBounds = {
-      availableWidth: Math.max(320, bounds.width || center?.width || 720),
-      availableHeight: Math.max(480, bounds.height || center?.height || 720),
-      fitFraction: .88,
-      maxScale: 1.2
-    };
+    const frame = previewFrameFromUnit(unit);
+    const fitBounds = previewFitBounds(host);
 
     if (stage === 'final' && previewCompare) {
       const profiles = model.targetProfiles.slice(0, 4);

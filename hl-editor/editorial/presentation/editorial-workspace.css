@@ -260,3 +260,23 @@
     max-width:none;
   }
 }
+
+
+/* HEARTLINE 3.9.2 — Preview text visualization */
+.hl-editorial-preview-center.editing-text{
+  grid-template-rows:auto minmax(0,1fr) auto auto;
+}
+.hl-editorial-preview-center.editing-text .hl-editorial-preview-caption{
+  margin-bottom:0;
+}
+.hl-editorial-preview-canvas[data-render-state="placeholder"] .player-device-wrap,
+.hl-editorial-preview-canvas[data-render-state="hydrating"] .player-device-wrap,
+.hl-editorial-preview-canvas[data-render-state="ready"] .player-device-wrap{
+  display:block!important;
+  visibility:visible!important;
+  opacity:1!important;
+}
+.hl-editorial-preview-canvas .player-device{
+  visibility:visible!important;
+  opacity:1!important;
+}
