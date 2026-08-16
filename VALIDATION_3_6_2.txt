@@ -1,0 +1,61 @@
+HEARTLINE 3.6.2 validation
+===========================
+
+Base commit:
+17eb0687ab028aee3580e1920b9fee1894e92631
+
+node --check hl-editor/presentation/font-policy.js
+---------------------------------------------------
+exit code: 0
+
+
+node --test tests/font-policy.test.js
+--------------------------------------
+TAP version 13
+# Subtest: unified font policy uses the application sans-serif stack
+ok 1 - unified font policy uses the application sans-serif stack
+  ---
+  duration_ms: 0.715753
+  type: 'test'
+  ...
+# Subtest: legacy literary surfaces cannot apply serif families
+ok 2 - legacy literary surfaces cannot apply serif families
+  ---
+  duration_ms: 0.920107
+  type: 'test'
+  ...
+# Subtest: technical code surfaces are excluded from the universal inheritance override
+ok 3 - technical code surfaces are excluded from the universal inheritance override
+  ---
+  duration_ms: 0.152086
+  type: 'test'
+  ...
+# Subtest: proofreading serif control is retired and preference normalizes to sans
+ok 4 - proofreading serif control is retired and preference normalizes to sans
+  ---
+  duration_ms: 0.145026
+  type: 'test'
+  ...
+# Subtest: font policy is part of the editor composition root
+ok 5 - font policy is part of the editor composition root
+  ---
+  duration_ms: 0.185475
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 55.170966
+
+
+exit code: 0
+
+Scope
+-----
+Presentation/font-family policy only.
+No Domain/Application/Infrastructure logic was changed.

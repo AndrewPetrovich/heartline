@@ -1,0 +1,58 @@
+/* HEARTLINE 3.6.2 — unified UI font policy
+   The application uses one standard sans-serif stack everywhere.
+   Legacy Georgia / Times / serif declarations remain harmless because
+   this policy is loaded last and owns the final font-family cascade.
+*/
+
+:root{
+  --hl-ui-font:
+    Inter,
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    Arial,
+    sans-serif;
+}
+
+html,
+body{
+  font-family:var(--hl-ui-font)!important;
+}
+
+/* Every normal UI/text element inherits the same project font.
+   Technical code surfaces keep their own monospace family. */
+body :where(*):not(code):not(pre):not(kbd):not(samp){
+  font-family:inherit!important;
+}
+
+button,
+input,
+select,
+textarea,
+dialog{
+  font-family:inherit!important;
+}
+
+/* Explicit coverage for legacy literary surfaces. */
+.project-cover-placeholder strong,
+.context-frame,
+.current-frame .frame-text,
+.frame-card-text,
+.hl-proof-context,
+.hl-proof-editor,
+.hl-proof-quote,
+.hl-proof-choice-options,
+.reader-context-zone,
+.reader-current-zone{
+  font-family:var(--hl-ui-font)!important;
+}
+
+/* Old "font mode" classes can no longer re-enable serif. */
+.reader-font-serif,
+.hl-proof-font-serif,
+.reader-font-sans,
+.hl-proof-font-sans{
+  font-family:var(--hl-ui-font)!important;
+}

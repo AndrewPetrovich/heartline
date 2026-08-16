@@ -1,0 +1,24 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.6.2",
+  "baseCommit": "17eb0687ab028aee3580e1920b9fee1894e92631",
+  "mode": "non-destructive-update",
+  "replace": [
+    "index.html",
+    "package.json",
+    "sw.js",
+    "hl-editor/index.js",
+    "tools/verify-repository.mjs"
+  ],
+  "add": [
+    "hl-editor/presentation/font-policy.js",
+    "hl-editor/presentation/font-policy.css",
+    "tests/font-policy.test.js",
+    "APPLY_3_6_2.md",
+    "QA_FONT_POLICY_3_6_2.md",
+    "UPDATE_MANIFEST_3_6_2.json",
+    "VALIDATION_3_6_2.txt",
+    "SHA256SUMS_3_6_2.txt"
+  ],
+  "delete": []
+}
