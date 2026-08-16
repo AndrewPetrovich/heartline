@@ -1,0 +1,61 @@
+HEARTLINE 3.6.3 validation
+===========================
+
+Base commit:
+ad8ef8c115eeb8b4ccb0047e193b23cdd77681dd
+
+node --check hl-editor/presentation/library-card-cleanup.js
+-----------------------------------------------------------
+exit code: 0
+
+
+node --test tests/library-card-cleanup.test.js
+----------------------------------------------
+TAP version 13
+# Subtest: library cover placeholder removes duplicated project text
+ok 1 - library cover placeholder removes duplicated project text
+  ---
+  duration_ms: 0.611419
+  type: 'test'
+  ...
+# Subtest: library structure and production blocks are removed from DOM
+ok 2 - library structure and production blocks are removed from DOM
+  ---
+  duration_ms: 0.714441
+  type: 'test'
+  ...
+# Subtest: css provides a defensive no-text/no-analytics fallback
+ok 3 - css provides a defensive no-text/no-analytics fallback
+  ---
+  duration_ms: 0.130544
+  type: 'test'
+  ...
+# Subtest: cleanup is wired after the design and font policies
+ok 4 - cleanup is wired after the design and font policies
+  ---
+  duration_ms: 0.138625
+  type: 'test'
+  ...
+# Subtest: cleanup remains Presentation-only
+ok 5 - cleanup remains Presentation-only
+  ---
+  duration_ms: 0.263722
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 48.943737
+
+
+exit code: 0
+
+Scope
+-----
+Presentation-only Library cleanup.
+Project data and business logic are unchanged.

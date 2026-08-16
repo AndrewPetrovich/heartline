@@ -1,0 +1,24 @@
+{
+  "schema": "heartline-update-v1",
+  "version": "3.6.3",
+  "baseCommit": "ad8ef8c115eeb8b4ccb0047e193b23cdd77681dd",
+  "mode": "non-destructive-update",
+  "replace": [
+    "index.html",
+    "package.json",
+    "sw.js",
+    "hl-editor/index.js",
+    "tools/verify-repository.mjs"
+  ],
+  "add": [
+    "hl-editor/presentation/library-card-cleanup.js",
+    "hl-editor/presentation/library-card-cleanup.css",
+    "tests/library-card-cleanup.test.js",
+    "APPLY_3_6_3.md",
+    "QA_LIBRARY_CLEANUP_3_6_3.md",
+    "UPDATE_MANIFEST_3_6_3.json",
+    "VALIDATION_3_6_3.txt",
+    "SHA256SUMS_3_6_3.txt"
+  ],
+  "delete": []
+}
